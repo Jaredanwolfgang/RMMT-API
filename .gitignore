@@ -6,3 +6,4 @@ __pycache__
 *_venv/
 sql
 log
+.DS_Store

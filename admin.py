@@ -11,7 +11,7 @@ from sqlalchemy import or_, func
 from database import db_session
 from models import Admin, Student, Team, ExchangingNeed, CustomQuestionnaireItem, SystemSetting, QuestionnaireItem, \
     MatchingScore, QuestionnaireAnswer, TeamRequest, TeamInvitation, get_system_setting, CustomQuestionnaireAnswer, \
-    ExchangingRequest
+    ExchangingRequest, Announcement, QuestionnairePage
 
 admin_pages = Blueprint('admin_pages', __name__, template_folder="templates/admin")
 
@@ -450,18 +450,150 @@ def system_setting_delete():
     })
 
 
-@admin_pages.get('/questionnaire/list')
+@admin_pages.get('/announcement/list')
 @admin_required()
-def questionnaire_list():
-    questionnaire_items = db_session.query(QuestionnaireItem).order_by(QuestionnaireItem.index.asc()).all()
-
-    questionnaire_items = [questionnaire_item.to_dict() for questionnaire_item in questionnaire_items]
-
+def announcement_list():
+    items = db_session.query(Announcement).order_by(Announcement.created_at.desc()).all()
     return jsonify({
         "code": 200,
         "msg": "success",
-        "data": questionnaire_items
+        "data": [a.to_dict() for a in items]
     })
+
+
+@admin_pages.post('/announcement')
+@admin_required()
+def announcement_create():
+    if request.json is None:
+        return jsonify({"code": 400, "msg": "缺少参数"}), 400
+    title = request.json.get('title', '').strip()
+    content = request.json.get('content') or ''
+    if not title:
+        return jsonify({"code": 400, "msg": "标题不能为空"}), 400
+    item = Announcement(title=title, content=content)
+    db_session.add(item)
+    db_session.commit()
+    return jsonify({
+        "code": 200,
+        "msg": "success",
+        "data": item.to_dict()
+    })
+
+
+@admin_pages.put('/announcement/<int:aid>')
+@admin_required()
+def announcement_update(aid):
+    item = db_session.query(Announcement).filter(Announcement.id == aid).first()
+    if item is None:
+        return jsonify({"code": 404, "msg": "公告不存在"}), 404
+    if request.json:
+        if 'title' in request.json:
+            title = request.json.get('title', '').strip()
+            if title:
+                item.title = title
+        if 'content' in request.json:
+            item.content = request.json.get('content') or ''
+    item.updated_at = datetime.datetime.now()
+    db_session.commit()
+    return jsonify({
+        "code": 200,
+        "msg": "success",
+        "data": item.to_dict()
+    })
+
+
+@admin_pages.delete('/announcement/<int:aid>')
+@admin_required()
+def announcement_delete(aid):
+    item = db_session.query(Announcement).filter(Announcement.id == aid).first()
+    if item is None:
+        return jsonify({"code": 404, "msg": "公告不存在"}), 404
+    db_session.delete(item)
+    db_session.commit()
+    return jsonify({"code": 200, "msg": "success"})
+
+
+@admin_pages.get('/questionnaire/list')
+@admin_required()
+def questionnaire_list():
+    # structured: pages + items
+    pages = db_session.query(QuestionnairePage).order_by(QuestionnairePage.index.asc()).all()
+    pages_out = []
+    for p in pages:
+        items = db_session.query(QuestionnaireItem) \
+            .filter(QuestionnaireItem.page_id == p.id) \
+            .order_by(QuestionnaireItem.index_in_page.asc()) \
+            .all()
+        pages_out.append({
+            **p.to_dict(only=['id', 'title', 'remark', 'index', 'created_at', 'updated_at']),
+            "items": [i.to_dict(only=[
+                'id', 'title', 'weight', 'data_type', 'params', 'type',
+                'index', 'page_id', 'index_in_page', 'created_at', 'updated_at'
+            ]) for i in items]
+        })
+    return jsonify({"code": 200, "msg": "success", "data": {"pages": pages_out}})
+
+
+@admin_pages.get('/questionnaire/pages')
+@admin_required()
+def questionnaire_pages_list():
+    pages = db_session.query(QuestionnairePage).order_by(QuestionnairePage.index.asc()).all()
+    return jsonify({"code": 200, "msg": "success", "data": [p.to_dict(only=['id', 'title', 'remark', 'index', 'created_at', 'updated_at']) for p in pages]})
+
+
+@admin_pages.post('/questionnaire/page')
+@admin_required()
+def questionnaire_page_create():
+    if request.json is None:
+        return jsonify({"code": 400, "msg": "请求体不能为空"}), 400
+    title = (request.json.get("title") or "").strip()
+    if not title:
+        return jsonify({"code": 400, "msg": "title 不能为空"}), 400
+    remark = request.json.get("remark") or ""
+    index = request.json.get("index")
+    if index is None:
+        max_index = db_session.query(func.max(QuestionnairePage.index)).scalar()
+        index = (max_index or 0) + 1
+    p = QuestionnairePage(title=title, remark=remark, index=int(index))
+    db_session.add(p)
+    db_session.commit()
+    return jsonify({"code": 200, "msg": "success", "data": p.to_dict()})
+
+
+@admin_pages.put('/questionnaire/page/<int:page_id>')
+@admin_required()
+def questionnaire_page_update(page_id):
+    p = db_session.query(QuestionnairePage).filter_by(id=page_id).first()
+    if p is None:
+        return jsonify({"code": 404, "msg": "分页不存在"}), 404
+    if request.json is None:
+        return jsonify({"code": 400, "msg": "请求体不能为空"}), 400
+    data = request.json
+    if "title" in data:
+        t = (data.get("title") or "").strip()
+        if t:
+            p.title = t
+    if "remark" in data:
+        p.remark = data.get("remark") or ""
+    if "index" in data:
+        p.index = int(data["index"])
+    p.updated_at = datetime.datetime.now()
+    db_session.commit()
+    return jsonify({"code": 200, "msg": "success", "data": p.to_dict()})
+
+
+@admin_pages.delete('/questionnaire/page/<int:page_id>')
+@admin_required()
+def questionnaire_page_delete(page_id):
+    p = db_session.query(QuestionnairePage).filter_by(id=page_id).first()
+    if p is None:
+        return jsonify({"code": 404, "msg": "分页不存在"}), 404
+    items_count = db_session.query(QuestionnaireItem).filter(QuestionnaireItem.page_id == page_id).count()
+    if items_count > 0:
+        return jsonify({"code": 400, "msg": "该分页下仍有题目，请先迁移或删除题目"}), 400
+    db_session.delete(p)
+    db_session.commit()
+    return jsonify({"code": 200, "msg": "success"})
 
 
 @admin_pages.post('/questionnaire/set')
@@ -507,6 +639,109 @@ def questionnaire_set():
             "code": 200,
             "msg": "success"
         })
+
+
+@admin_pages.post('/questionnaire/item')
+@admin_required()
+def questionnaire_item_create():
+    """Add a single questionnaire item. Does not affect existing answers."""
+    if request.json is None:
+        return jsonify({"code": 400, "msg": "请求体不能为空"}), 400
+    data = request.json
+    title = data.get('title')
+    if not title:
+        return jsonify({"code": 400, "msg": "title 不能为空"}), 400
+    item_id = data.get('id')
+    if not item_id:
+        import uuid
+        item_id = 'item_' + uuid.uuid4().hex[:16]
+    if db_session.query(QuestionnaireItem).filter_by(id=item_id).first():
+        return jsonify({"code": 400, "msg": "该 id 已存在"}), 400
+    weight = data.get('weight', 1.0)
+    data_type = data.get('data_type', 'string')
+    params = data.get('params', '{}')
+    if isinstance(params, dict):
+        params = str(params)
+    page_id = data.get('page_id')
+    index_in_page = data.get('index_in_page')
+    if page_id is None:
+        first_page = db_session.query(QuestionnairePage).order_by(QuestionnairePage.index.asc()).first()
+        page_id = first_page.id if first_page else None
+    if index_in_page is None and page_id is not None:
+        max_i = db_session.query(func.max(QuestionnaireItem.index_in_page)) \
+            .filter(QuestionnaireItem.page_id == int(page_id)).scalar()
+        index_in_page = (max_i or 0) + 1
+    # legacy index (global) still maintained for backward compatibility
+    index = data.get('index')
+    if index is None:
+        max_index = db_session.query(func.max(QuestionnaireItem.index)).scalar()
+        index = (max_index or 0) + 1
+    item_type = data.get('type', 'text')
+    if item_type == 'text':
+        weight = 0
+    item = QuestionnaireItem(
+        id=item_id,
+        title=title,
+        weight=float(weight),
+        data_type=data_type,
+        params=params,
+        index=int(index),
+        type=item_type,
+        page_id=int(page_id) if page_id is not None else None,
+        index_in_page=int(index_in_page) if index_in_page is not None else int(index),
+    )
+    db_session.add(item)
+    db_session.commit()
+    return jsonify({"code": 200, "msg": "success", "data": item.to_dict()})
+
+
+@admin_pages.put('/questionnaire/item/<item_id>')
+@admin_required()
+def questionnaire_item_update(item_id):
+    """Update a single questionnaire item. Does not delete existing answers."""
+    item = db_session.query(QuestionnaireItem).filter_by(id=item_id).first()
+    if item is None:
+        return jsonify({"code": 404, "msg": "题目不存在"}), 404
+    if request.json is None:
+        return jsonify({"code": 400, "msg": "请求体不能为空"}), 400
+    data = request.json
+    if 'title' in data:
+        item.title = data['title']
+    if 'weight' in data:
+        w = data['weight']
+        if item.type != 'text':
+            item.weight = float(w)
+    if 'data_type' in data:
+        item.data_type = data['data_type']
+    if 'params' in data:
+        p = data['params']
+        item.params = str(p) if not isinstance(p, str) else p
+    if 'index' in data:
+        item.index = int(data['index'])
+    if 'page_id' in data:
+        item.page_id = int(data['page_id']) if data['page_id'] is not None else None
+    if 'index_in_page' in data:
+        item.index_in_page = int(data['index_in_page'])
+    if 'type' in data:
+        item.type = data['type']
+        if item.type == 'text':
+            item.weight = 0
+    item.updated_at = datetime.datetime.now()
+    db_session.commit()
+    return jsonify({"code": 200, "msg": "success", "data": item.to_dict()})
+
+
+@admin_pages.delete('/questionnaire/item/<item_id>')
+@admin_required()
+def questionnaire_item_delete(item_id):
+    """Delete a single questionnaire item and all its answers."""
+    item = db_session.query(QuestionnaireItem).filter_by(id=item_id).first()
+    if item is None:
+        return jsonify({"code": 404, "msg": "题目不存在"}), 404
+    db_session.query(QuestionnaireAnswer).filter_by(item_id=item_id).delete(synchronize_session=False)
+    db_session.delete(item)
+    db_session.commit()
+    return jsonify({"code": 200, "msg": "success"})
 
 
 @admin_pages.post('/system_reset/perform')

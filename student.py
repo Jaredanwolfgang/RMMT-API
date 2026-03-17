@@ -7,8 +7,10 @@ from flask_jwt_extended import create_access_token, verify_jwt_in_request, get_j
 from sqlalchemy.orm import joinedload
 
 from database import db_session
+import json
+
 from models import Student, QuestionnaireItem, QuestionnaireAnswer, MatchingScore, Team, TeamInvitation, \
-    TeamRequest, get_system_setting
+    TeamRequest, get_system_setting, Announcement, QuestionnairePage, QuestionnairePageAnswer
     
 student_pages = Blueprint('student_pages', __name__, template_folder="templates/student")
 
@@ -25,63 +27,6 @@ def student_required():
                     "code": 403,
                     "msg": "无权限！"
                 }), 403
-
-        return decorator
-
-    return wrapper
-
-
-def in_step_1_period():
-    def wrapper(fn):
-        @wraps(fn)
-        def decorator(*args, **kwargs):
-            start_at = datetime.datetime.strptime(get_system_setting('step_1_start_at'), "%Y-%m-%d %H:%M:%S")
-            end_at = datetime.datetime.strptime(get_system_setting('step_1_end_at'), "%Y-%m-%d %H:%M:%S")
-            if start_at <= datetime.datetime.now() <= end_at:
-                return fn(*args, **kwargs)
-            else:
-                return jsonify({
-                    "code": "400",
-                    "msg": "未到个人信息补充系统开放时间"
-                }), 200
-
-        return decorator
-
-    return wrapper
-
-
-def in_step_2_period():
-    def wrapper(fn):
-        @wraps(fn)
-        def decorator(*args, **kwargs):
-            start_at = datetime.datetime.strptime(get_system_setting('step_2_start_at'), "%Y-%m-%d %H:%M:%S")
-            end_at = datetime.datetime.strptime(get_system_setting('step_2_end_at'), "%Y-%m-%d %H:%M:%S")
-            if start_at <= datetime.datetime.now() <= end_at:
-                return fn(*args, **kwargs)
-            else:
-                return jsonify({
-                    "code": "400",
-                    "msg": "未到异步系统开放时间"
-                }), 200
-
-        return decorator
-
-    return wrapper
-
-
-def in_step_3_period():
-    def wrapper(fn):
-        @wraps(fn)
-        def decorator(*args, **kwargs):
-            start_at = datetime.datetime.strptime(get_system_setting('step_3_start_at'), "%Y-%m-%d %H:%M:%S")
-            end_at = datetime.datetime.strptime(get_system_setting('step_3_end_at'), "%Y-%m-%d %H:%M:%S")
-            if start_at <= datetime.datetime.now() <= end_at:
-                return fn(*args, **kwargs)
-            else:
-                return jsonify({
-                    "code": "400",
-                    "msg": "未到舍友双选系统开放时间"
-                }), 200
 
         return decorator
 
@@ -144,15 +89,122 @@ def logout():
 @student_pages.get('/questionnaire/list')
 @student_required()
 def questionnaire_list():
+    # legacy flat list (kept for compatibility)
     questionnaire_items = db_session.query(QuestionnaireItem).order_by(QuestionnaireItem.index.asc()).all()
-
     questionnaire_items = [questionnaire_item.to_dict() for questionnaire_item in questionnaire_items]
+    return jsonify({"code": 200, "msg": "success", "data": questionnaire_items})
 
-    return jsonify({
-        "code": 200,
-        "msg": "success",
-        "data": questionnaire_items
-    })
+
+@student_pages.get('/questionnaire/structure')
+@student_required()
+def questionnaire_structure():
+    pages = db_session.query(QuestionnairePage).order_by(QuestionnairePage.index.asc()).all()
+    out_pages = []
+    for p in pages:
+        items = db_session.query(QuestionnaireItem) \
+            .filter(QuestionnaireItem.page_id == p.id) \
+            .order_by(QuestionnaireItem.index_in_page.asc()) \
+            .all()
+        out_pages.append({
+            **p.to_dict(only=['id', 'title', 'remark', 'index', 'created_at', 'updated_at']),
+            "items": [i.to_dict(only=[
+                'id', 'title', 'weight', 'data_type', 'params', 'type',
+                'index', 'page_id', 'index_in_page', 'created_at', 'updated_at'
+            ]) for i in items]
+        })
+    return jsonify({"code": 200, "msg": "success", "data": {"pages": out_pages}})
+
+
+@student_pages.get('/questionnaire/page_answer')
+@student_required()
+def questionnaire_get_page_answer():
+    page_id = request.args.get("page_id", None)
+    if page_id is None:
+        return jsonify({"code": 400, "msg": "缺少 page_id"}), 400
+    row = db_session.query(QuestionnairePageAnswer) \
+        .filter(QuestionnairePageAnswer.student_id == current_user.id) \
+        .filter(QuestionnairePageAnswer.page_id == int(page_id)) \
+        .first()
+    if row is None or not row.answers_json:
+        return jsonify({"code": 200, "msg": "success", "data": {}})
+    try:
+        return jsonify({"code": 200, "msg": "success", "data": json.loads(row.answers_json)})
+    except Exception:
+        return jsonify({"code": 200, "msg": "success", "data": {}})
+
+
+@student_pages.post('/questionnaire/page_answer')
+@student_required()
+def questionnaire_save_page_answer():
+    if request.json is None:
+        return jsonify({"code": 400, "msg": "请求体不能为空"}), 400
+    page_id = request.json.get("page_id", None)
+    answers = request.json.get("answers", None)
+    if page_id is None or not isinstance(answers, dict):
+        return jsonify({"code": 400, "msg": "参数错误"}), 400
+    page_id = int(page_id)
+
+    # upsert page draft
+    row = db_session.query(QuestionnairePageAnswer) \
+        .filter(QuestionnairePageAnswer.student_id == current_user.id) \
+        .filter(QuestionnairePageAnswer.page_id == page_id) \
+        .first()
+    answers_json = json.dumps(answers, ensure_ascii=False)
+    if row is None:
+        row = QuestionnairePageAnswer(student_id=current_user.id, page_id=page_id, answers_json=answers_json, status=0)
+        db_session.add(row)
+    else:
+        row.answers_json = answers_json
+        row.updated_at = datetime.datetime.now()
+    db_session.commit()
+
+    # compatibility: upsert per-item answers into questionnaire_answers for matching logic
+    exist_answers = db_session.query(QuestionnaireAnswer).filter(
+        QuestionnaireAnswer.student_id == current_user.id).all()
+    exist_by_item = {a.item_id: a for a in exist_answers}
+
+    page_items = db_session.query(QuestionnaireItem).filter(QuestionnaireItem.page_id == page_id).all()
+    valid_item_ids = {i.id for i in page_items}
+    default_weight = {i.id: i.weight for i in page_items}
+
+    bulk_save_models = []
+    data_changed = False
+    for item_id, value in answers.items():
+        if item_id not in valid_item_ids:
+            continue
+        if not isinstance(value, dict) or "answer" not in value:
+            continue
+        w = value.get("weight", 1)
+        if default_weight.get(item_id, 1) < 0:
+            w = default_weight[item_id]
+        ans_str = str(value.get("answer"))
+        if item_id in exist_by_item:
+            ex = exist_by_item[item_id]
+            if ex.answer != ans_str or ex.weight != w:
+                ex.answer = ans_str
+                ex.weight = w
+                ex.updated_at = datetime.datetime.now()
+                ex.vector = None
+                db_session.commit()
+                data_changed = True
+        else:
+            bulk_save_models.append(
+                QuestionnaireAnswer(item_id=item_id, answer=ans_str, student_id=current_user.id, weight=w, vector=None)
+            )
+            data_changed = True
+
+    if data_changed and bulk_save_models:
+        db_session.bulk_save_objects(bulk_save_models)
+        db_session.commit()
+
+        # 删除匹配得分（该页变动也会影响匹配）
+        db_session.query(MatchingScore) \
+            .filter((MatchingScore.to_student_id == current_user.id) | (
+                MatchingScore.from_student_id == current_user.id)) \
+            .delete(synchronize_session=False)
+        db_session.commit()
+
+    return jsonify({"code": 200, "msg": "success"})
 
 
 @student_pages.get('/questionnaire/answer')
@@ -172,7 +224,6 @@ def questionnaire_get_answers():
 
 
 @student_pages.post('/questionnaire/answer')
-@in_step_1_period()
 @student_required()
 def questionnaire_set_answers():
     if request.json is not None:
@@ -298,7 +349,6 @@ def team_recommend_teammates():
 # !!important!! 这个API主要用于两个都没有入队伍的同学组成新的队伍
 @student_pages.post('/team/invite')
 @student_required()
-@in_step_3_period()
 def team_invite():
     if request.json is not None:
         target_student_id = request.json.get('target_student_id')
@@ -414,7 +464,6 @@ def team_invite():
 
 # 入队申请
 @student_pages.post('/team/request')
-@in_step_3_period()
 @student_required()
 def team_request():
     if request.json is not None:
@@ -566,7 +615,6 @@ def team_request_list():
 
 @student_pages.post('/team/invitation/process')
 @student_required()
-@in_step_3_period()
 def team_invitation_process():
     if request.json is not None:
         team_invitation_id = request.json.get("team_invitation_id", None)
@@ -674,7 +722,6 @@ def team_invitation_process():
 
 @student_pages.post("/team/request/process")
 @student_required()
-@in_step_3_period()
 def team_request_process():
     if request.json is not None:
         team_request_id = request.json.get("team_request_id", None)
@@ -750,16 +797,21 @@ def get_system_settings():
         "code": 200,
         "msg": "success",
         "data": {
-            "step_1_start_at": get_system_setting("step_1_start_at"),
-            "step_1_end_at": get_system_setting("step_1_end_at"),
-            "step_2_start_at": get_system_setting("step_2_start_at"),
-            "step_2_end_at": get_system_setting("step_2_end_at"),
-            "step_3_start_at": get_system_setting("step_3_start_at"),
-            "step_3_end_at": get_system_setting("step_3_end_at"),
             "team_max_student_count": get_system_setting("team_max_student_count"),
             "questionnaire_json": get_system_setting("questionnaire_json", {}),
             "tips": get_system_setting("tips", {})
         }
+    })
+
+
+@student_pages.get("/announcement/list")
+@student_required()
+def announcement_list():
+    items = db_session.query(Announcement).order_by(Announcement.created_at.desc()).all()
+    return jsonify({
+        "code": 200,
+        "msg": "success",
+        "data": [a.to_dict() for a in items]
     })
 
 

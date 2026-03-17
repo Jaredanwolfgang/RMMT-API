@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from flask import Flask
+from flask import Flask, request
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, get_jwt, create_access_token, get_jwt_identity, set_access_cookies
 from flask_talisman import Talisman
@@ -21,11 +21,14 @@ jwt = JWTManager(app)
 app.register_blueprint(admin_pages, url_prefix="/api/admin")
 app.register_blueprint(student_pages, url_prefix="/api/student")
 
-# 跨域支持
+# 跨域支持（本地开发允许前端 origin；生产环境建议用环境变量配置）
+_ALLOWED_ORIGINS = {"http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://127.0.0.1:5174"}
 CORS(
     app,
-    supports_credentials=True, 
-    expose_headers=['Refresh-Access-Token']
+    origins=list(_ALLOWED_ORIGINS),
+    supports_credentials=True,
+    expose_headers=['Refresh-Access-Token'],
+    allow_headers=['Content-Type', 'Authorization'],
 )
 
 
@@ -82,4 +85,5 @@ def hello_world():  # put application's code here
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # 使用 5001：macOS 上 5000 常被 AirPlay Receiver 占用，会返回 403
+    app.run(debug=True, port=5001)

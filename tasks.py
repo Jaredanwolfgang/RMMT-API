@@ -198,11 +198,8 @@ def get_questionnaire_answer_by_item_id(item_id, questionnaire_answers):
 
 
 def is_in_calculating_time():
-    start_time_string = db_session.query(SystemSetting.value).filter(SystemSetting.key == "step_2_start_at").first()[0]
-    stop_time_string = db_session.query(SystemSetting.value).filter(SystemSetting.key == "step_2_end_at").first()[0]
-    start_time = arrow.get(start_time_string, tzinfo="Asia/Shanghai")
-    stop_time = arrow.get(stop_time_string, tzinfo="Asia/Shanghai")
-    return start_time <= arrow.now("Asia/Shanghai") <= stop_time
+    # 不再依赖三步起止时间，匹配任务按间隔执行
+    return True
 
 
 def output(message):

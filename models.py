@@ -39,6 +39,30 @@ class QuestionnaireItem(Base, SerializerMixin):
     created_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
     index = Column(INTEGER(11), server_default=text("'1'"))
     type = Column(String(64), nullable=False, server_default=text("'text'"))
+    # pagination
+    page_id = Column(ForeignKey('questionnaire_pages.id', ondelete='RESTRICT', onupdate='CASCADE'), index=True)
+    index_in_page = Column(INTEGER(11), server_default=text("'1'"))
+
+    page = relationship('QuestionnairePage', back_populates='items')
+
+    # avoid recursion: item -> page -> items -> page ...
+    serialize_rules = ('-page',)
+
+
+class QuestionnairePage(Base, SerializerMixin):
+    __tablename__ = 'questionnaire_pages'
+
+    id = Column(INTEGER(11), primary_key=True)
+    title = Column(String(255), nullable=False)
+    remark = Column(Text)
+    index = Column(INTEGER(11), server_default=text("'1'"))
+    created_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+
+    items = relationship('QuestionnaireItem', back_populates='page')
+
+    # avoid recursion: page -> items -> page ...
+    serialize_rules = ('-items',)
 
 
 class SystemSetting(Base, SerializerMixin):
@@ -47,6 +71,16 @@ class SystemSetting(Base, SerializerMixin):
     id = Column(INTEGER(11), primary_key=True)
     key = Column(String(255), nullable=False, unique=True)
     value = Column(LONGTEXT)
+    created_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+
+
+class Announcement(Base, SerializerMixin):
+    __tablename__ = 'announcements'
+
+    id = Column(INTEGER(11), primary_key=True)
+    title = Column(String(255), nullable=False)
+    content = Column(Text)
     created_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
 
@@ -325,6 +359,20 @@ class QuestionnaireAnswer(Base, SerializerMixin):
                         primaryjoin='QuestionnaireItem.id == QuestionnaireAnswer.item_id', lazy='joined')
 
 
+class QuestionnairePageAnswer(Base, SerializerMixin):
+    __tablename__ = 'questionnaire_page_answers'
+
+    id = Column(INTEGER(11), primary_key=True)
+    student_id = Column(ForeignKey('students.id', ondelete='CASCADE', onupdate='CASCADE'), index=True, nullable=False)
+    page_id = Column(ForeignKey('questionnaire_pages.id', ondelete='CASCADE', onupdate='CASCADE'), index=True, nullable=False)
+    answers_json = Column(LONGTEXT)
+    status = Column(TINYINT(4), server_default=text("'0'"), comment='0 draft, 1 submitted')
+    created_at = Column(TIMESTAMP, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(TIMESTAMP, server_default=text("CURRENT_TIMESTAMP"))
+
+    page = relationship('QuestionnairePage')
+
+
 class TeamRequest(Base, SerializerMixin):
     __tablename__ = 'team_requests'
 
@@ -382,15 +430,9 @@ if __name__ == "__main__":
 
     Base.metadata.create_all(engine)
 
-    # 默认 system_settings
+    # 默认 system_settings（已移除三步起止时间）
     default_settings = {
         "team_max_student_count": "4",
-        "step_1_start_at": "2023-08-06 00:00:00",
-        "step_1_end_at": "2023-08-11 23:59:59",
-        "step_2_start_at": "2023-08-06 00:00:00",
-        "step_2_end_at": "2023-08-12 00:00:00",
-        "step_3_start_at": "2023-08-06 00:00:00",
-        "step_3_end_at": "2023-08-12 00:00:00",
         "tips": """1. 填写系统务必真实嗷，同时也要发展性预见自己未来情况填写嗷，这样利于舍友之间长时间相处滴
 2. 不要过于留念自己同学，可能到了大学多多少少会变一点滴，谨慎选择嗷
 3. 系统中奇异值（越小说明和你预期越近）仅供参考，一定要联系舍友了解嗷，毕竟要一起度过大学四年嘛，可不能随意了！
@@ -409,6 +451,17 @@ if __name__ == "__main__":
     for key, value in default_settings.items():
         if not db_session.query(SystemSetting).filter_by(key=key).first():
             db_session.add(SystemSetting(key=key, value=value))
+
+    # 删除旧的三步起止时间配置（一次性清理）
+    step_keys = (
+        "step_1_start_at", "step_1_end_at",
+        "step_2_start_at", "step_2_end_at",
+        "step_3_start_at", "step_3_end_at",
+    )
+    for key in step_keys:
+        row = db_session.query(SystemSetting).filter_by(key=key).first()
+        if row:
+            db_session.delete(row)
 
     db_session.commit()
     print("✅ 默认 system_settings 已初始化")

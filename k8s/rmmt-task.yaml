@@ -19,7 +19,7 @@ spec:
       - name: rmmt-task
         image: rmmt-api:latest
         imagePullPolicy: Never
-        command: ["/bin/sh", "-c", "python tasks.py >> log/tasks.log"]
+        command: ["/bin/sh", "-c", "python tasks.py >> log/tasks.log 2>&1"]
         env:
         - name: NODE_ENV
           valueFrom:
