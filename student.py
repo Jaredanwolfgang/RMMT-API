@@ -125,7 +125,7 @@ def userinfo():
         "msg": "success",
         "data": {
             "user": current_user.to_dict(
-                only=['id', 'name', 'gender', 'contact', 'QQ', 'Wechat', 'Phone', 'mbti', 'team_id', 'team.id',
+                only=['id', 'name', 'gender', 'contact', 'qq', 'wechat', 'province', 'mbti', 'team_id', 'team.id',
                       'team.students.id', 'team.students.name',
                       'has_answered_questionnaire'])
         }
@@ -262,10 +262,17 @@ def team_recommend_teammates():
     for piece in recommend_scores:
         if piece.from_student.gender != current_user.gender:
             continue
-        item = piece.from_student.to_dict(only=['id', 'name', 'contact', 'QQ', 'Wechat', 'Phone', 'mbti'])
+        item = piece.from_student.to_dict(only=['id', 'name', 'contact', 'qq', 'wechat', 'province', 'mbti'])
         # join load 不能执行关联查询 所以在这里手动过滤
+        
+        team_id = piece.from_student.team_id
+        team_students = db_session.query(Student) \
+            .where(Student.team_id == team_id) \
+            .where(team_id != None) \
+            .all()
 
         item['score'] = piece.score
+        item['team_students_num'] = len(team_students)
         construct_data.append(item)
         added_student_ids.append(item['id'])
 
@@ -274,7 +281,7 @@ def team_recommend_teammates():
         .where(Student.id.not_in(added_student_ids)) \
         .all()
 
-    students_with_no_score = [piece.to_dict(only=['id', 'name', 'contact', 'QQ', 'Wechat', 'Phone', 'mbti']) for piece
+    students_with_no_score = [piece.to_dict(only=['id', 'name', 'contact', 'qq', 'wechat', 'province', 'mbti']) for piece
                               in students_with_no_score]
 
     return jsonify({
@@ -779,8 +786,8 @@ def get_student_detail(id):
         "msg": "success",
         "data": student.to_dict(
             only=['id', 'name', 'team', 'team_id', 'score', 'questionnaire_answers', 'contact', 'team.id',
-                  'team.students.id', 'QQ', 'Wechat', 'Phone', 'mbti',
-                  'team.students.name', 'team.students.contact', 'team.students.QQ', 'team.students.Wechat',
+                  'team.students.id', 'qq', 'wechat', 'province', 'mbti',
+                  'team.students.name', 'team.students.contact', 'team.students.qq', 'team.students.wechat', 'team.students.province',
                   'team.students.mbti', 'has_answered_questionnaire'])
     })
 
@@ -797,8 +804,8 @@ def get_team_detail():
         "code": 200,
         "msg": "success",
         "data": current_user.team.to_dict(['id', 'description', 'students.id',
-                                           'students.name', 'students.contact', 'students.QQ', 'students.Wechat' ,'students.has_answered_questionnaire',
-                                           'students.questionnaire_answers'])
+                                           'students.name', 'students.contact', 'students.qq', 'students.wechat' ,'students.has_answered_questionnaire',
+                                           'students.mbti', 'students.province', 'students.questionnaire_answers'])
     })
 
 
@@ -852,14 +859,14 @@ def change_password():
 def update_contact():
     if request.json is not None:
 
-        new_QQ = request.json.get('QQ')
-        new_Wechat = request.json.get('Wechat')
+        new_QQ = request.json.get('qq')
+        new_Wechat = request.json.get('wechat')
         if (new_Wechat is None or len(new_Wechat) < 1) and (new_QQ is None or len(new_QQ) < 1):
             return jsonify({
                 "code": 400,
                 "msg": "QQ和Wechat不能同时为空"
             })
-        new_Phone = request.json.get('Phone')
+        new_Province = request.json.get('province')
         # if new_Phone is None:
         #     return jsonify({
         #         "code": 400,
@@ -869,9 +876,9 @@ def update_contact():
         new_contact = request.json.get("contact")
 
         current_user.contact = new_contact
-        current_user.QQ = new_QQ
-        current_user.Wechat = new_Wechat
-        current_user.Phone = new_Phone
+        current_user.qq = new_QQ
+        current_user.wechat = new_Wechat
+        current_user.province = new_Province
         current_user.mbti = new_MBTI
 
         db_session.commit()

@@ -5,19 +5,33 @@ FROM python:3.10-slim-bookworm
 ARG NAME
 
 ENV NAME=${NAME}
-ENV PIP_SOURCE="https://pypi.tuna.tsinghua.edu.cn/simple"
+# ENV PIP_SOURCE="https://pypi.tuna.tsinghua.edu.cn/simple"
+ENV PIP_SOURCE="https://pypi.org/simple"
+ENV HF_ENDPOINT=https://hf-mirror.com
 
 # 设置工作目录
 WORKDIR /app
 
-# 复制应用代码到镜像中的 /app 目录
-COPY . /app
+# 提前复制 requirements.txt（用于利用缓存）
+COPY requirements.txt ./
 
 # 安装应用依赖
 RUN pip install -i ${PIP_SOURCE} --no-cache-dir -r requirements.txt
 RUN pip install -i ${PIP_SOURCE} gunicorn
 RUN pip install -i ${PIP_SOURCE} gevent
-RUN export HF_ENDPOINT=https://hf-mirror.com
+RUN pip uninstall -y text2vec
+RUN pip install -U text2vec
+
+# 复制应用代码到镜像中的 /app 目录
+COPY . /app
+
+# 修改时区
+RUN mv /etc/localtime localtime.bak
+RUN ln -s /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+
+RUN mkdir -p /app/log
+RUN touch /app/log/access.log
+RUN touch /app/log/error.log
 
 EXPOSE 5000
 

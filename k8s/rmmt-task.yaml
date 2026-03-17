@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rmmt-task
+  namespace: rmmt
+  labels:
+    app: rmmt-task
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rmmt-task
+  template:
+    metadata:
+      labels:
+        app: rmmt-task
+    spec:
+      containers:
+      - name: rmmt-task
+        image: rmmt-api:latest
+        imagePullPolicy: Never
+        command: ["/bin/sh", "-c", "python tasks.py >> log/tasks.log"]
+        env:
+        - name: NODE_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: rmmt-config
+              key: NODE_ENV
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: rmmt-config
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: rmmt-config
+              key: DB_PORT
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: rmmt-config
+              key: DB_NAME
+        - name: DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: rmmt-config
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            configMapKeyRef:
+              name: rmmt-config
+              key: DB_PASSWORD
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: rmmt-secrets
+              key: JWT_SECRET
+        - name: NAME
+          value: "rmmt-api-task"
+        - name: HF_ENDPOINT
+          value: "https://hf-mirror.com"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        # 添加日志卷挂载
+        volumeMounts:
+        - name: log-volume
+          mountPath: /app/log
+      volumes:
+      - name: log-volume
+        emptyDir: {}
+      restartPolicy: Always
