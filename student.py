@@ -1,10 +1,13 @@
 import datetime
+import os
+import time
 from functools import wraps
 
 import bcrypt
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import create_access_token, verify_jwt_in_request, get_jwt, current_user
 from sqlalchemy.orm import joinedload
+from werkzeug.utils import secure_filename
 
 from database import db_session
 import json
@@ -13,6 +16,23 @@ from models import Student, QuestionnaireItem, QuestionnaireAnswer, MatchingScor
     TeamRequest, get_system_setting, Announcement, QuestionnairePage, QuestionnairePageAnswer
     
 student_pages = Blueprint('student_pages', __name__, template_folder="templates/student")
+
+ALLOWED_AVATAR_EXTS = (".png", ".jpg", ".jpeg")
+
+
+def _avatar_dir():
+    return os.path.join(current_app.root_path, "static", "uploads", "student_avatar")
+
+
+def get_student_avatar_url(student_id):
+    base = _avatar_dir()
+    for ext in ALLOWED_AVATAR_EXTS:
+        fn = f"{student_id}{ext}"
+        p = os.path.join(base, fn)
+        if os.path.exists(p):
+            ts = int(os.path.getmtime(p))
+            return f"/static/uploads/student_avatar/{fn}?t={ts}"
+    return ""
 
 def student_required():
     def wrapper(fn):
@@ -65,14 +85,16 @@ def login():
 @student_pages.get("/userinfo")
 @student_required()
 def userinfo():
+    user_data = current_user.to_dict(
+        only=['id', 'name', 'gender', 'contact', 'qq', 'wechat', 'province', 'mbti', 'team_id', 'team.id',
+              'team.students.id', 'team.students.name',
+              'has_answered_questionnaire'])
+    user_data['avatar_url'] = get_student_avatar_url(current_user.id)
     return jsonify({
         "code": 200,
         "msg": "success",
         "data": {
-            "user": current_user.to_dict(
-                only=['id', 'name', 'gender', 'contact', 'qq', 'wechat', 'province', 'mbti', 'team_id', 'team.id',
-                      'team.students.id', 'team.students.name',
-                      'has_answered_questionnaire'])
+            "user": user_data
         }
     })
 
@@ -302,45 +324,58 @@ def questionnaire_set_answers():
 @student_pages.get('/team/recommend_teammates')
 @student_required()
 def team_recommend_teammates():
-    recommend_scores = db_session.query(MatchingScore) \
-        .where(MatchingScore.to_student_id == current_user.id) \
-        .options(joinedload(MatchingScore.from_student)) \
-        .order_by(MatchingScore.score.desc()) \
+    # 兼容两种分数方向：
+    # 1) from=对方, to=我（原始推荐方向）
+    # 2) from=我, to=对方（回退方向，避免因任务中断导致大厅全是无分）
+    related_scores = db_session.query(MatchingScore) \
+        .where((MatchingScore.to_student_id == current_user.id) | (MatchingScore.from_student_id == current_user.id)) \
         .all()
 
-    construct_data = []
-    added_student_ids = []
-    for piece in recommend_scores:
-        if piece.from_student.gender != current_user.gender:
-            continue
-        item = piece.from_student.to_dict(only=['id', 'name', 'contact', 'qq', 'wechat', 'province', 'mbti'])
-        # join load 不能执行关联查询 所以在这里手动过滤
-        
-        team_id = piece.from_student.team_id
-        team_students = db_session.query(Student) \
-            .where(Student.team_id == team_id) \
-            .where(team_id != None) \
-            .all()
+    incoming_score_map = {}
+    outgoing_score_map = {}
+    for piece in related_scores:
+        if piece.to_student_id == current_user.id and piece.from_student_id != current_user.id:
+            incoming_score_map[piece.from_student_id] = piece.score
+        elif piece.from_student_id == current_user.id and piece.to_student_id != current_user.id:
+            outgoing_score_map[piece.to_student_id] = piece.score
 
-        item['score'] = piece.score
-        item['team_students_num'] = len(team_students)
-        construct_data.append(item)
-        added_student_ids.append(item['id'])
-
-    students_with_no_score = db_session.query(Student) \
+    same_gender_students = db_session.query(Student) \
         .where(Student.gender == current_user.gender) \
-        .where(Student.id.not_in(added_student_ids)) \
+        .where(Student.id != current_user.id) \
         .all()
 
-    students_with_no_score = [piece.to_dict(only=['id', 'name', 'contact', 'qq', 'wechat', 'province', 'mbti']) for piece
-                              in students_with_no_score]
+    students_with_score = []
+    students_with_no_score_data = []
+
+    for piece in same_gender_students:
+        team_students_num = 0
+        if piece.team_id is not None:
+            team_students_num = db_session.query(Student) \
+                .where(Student.team_id == piece.team_id) \
+                .count()
+
+        item = piece.to_dict(only=['id', 'name', 'contact', 'qq', 'wechat', 'province', 'mbti'])
+        item['avatar_url'] = get_student_avatar_url(piece.id)
+        item['team_students_num'] = team_students_num
+
+        score = incoming_score_map.get(piece.id, None)
+        if score is None:
+            score = outgoing_score_map.get(piece.id, None)
+
+        if score is None:
+            students_with_no_score_data.append(item)
+        else:
+            item['score'] = score
+            students_with_score.append(item)
+
+    construct_data = sorted(students_with_score, key=lambda x: x['score'], reverse=True)
 
     return jsonify({
         "code": 200,
         "msg": "success",
         "data": {
             "students_with_score": construct_data,
-            "students_with_no_score": students_with_no_score
+            "students_with_no_score": students_with_no_score_data
         }
     })
 
@@ -798,8 +833,24 @@ def get_system_settings():
         "msg": "success",
         "data": {
             "team_max_student_count": get_system_setting("team_max_student_count"),
-            "questionnaire_json": get_system_setting("questionnaire_json", {}),
-            "tips": get_system_setting("tips", {})
+            "login_bg_url": get_system_setting("login_bg_url", ""),
+            "student_guide_bg_color": get_system_setting("student_guide_bg_color", ""),
+            "student_logo_url": get_system_setting("student_logo_url", ""),
+            "student_nav_system_name": get_system_setting("student_nav_system_name", "Roommate Matcher"),
+        }
+    })
+
+
+@student_pages.get("/public_style")
+def get_public_style():
+    """Public style settings used by unauthenticated pages (e.g. login)."""
+    return jsonify({
+        "code": 200,
+        "msg": "success",
+        "data": {
+            "login_bg_url": get_system_setting("login_bg_url", ""),
+            "student_logo_url": get_system_setting("student_logo_url", ""),
+            "student_guide_bg_color": get_system_setting("student_guide_bg_color", ""),
         }
     })
 
@@ -833,14 +884,22 @@ def get_student_detail(id):
     else:
         student.score = None
 
+    student_data = student.to_dict(
+        only=['id', 'name', 'team', 'team_id', 'score', 'questionnaire_answers', 'contact', 'team.id',
+              'team.students.id', 'qq', 'wechat', 'province', 'mbti',
+              'team.students.name', 'team.students.contact', 'team.students.qq', 'team.students.wechat', 'team.students.province',
+              'team.students.mbti', 'has_answered_questionnaire'])
+    student_data['avatar_url'] = get_student_avatar_url(student.id)
+    if student_data.get('team') and isinstance(student_data['team'].get('students'), list):
+        for member in student_data['team']['students']:
+            sid = member.get('id')
+            if sid is not None:
+                member['avatar_url'] = get_student_avatar_url(sid)
+
     return jsonify({
         "code": 200,
         "msg": "success",
-        "data": student.to_dict(
-            only=['id', 'name', 'team', 'team_id', 'score', 'questionnaire_answers', 'contact', 'team.id',
-                  'team.students.id', 'qq', 'wechat', 'province', 'mbti',
-                  'team.students.name', 'team.students.contact', 'team.students.qq', 'team.students.wechat', 'team.students.province',
-                  'team.students.mbti', 'has_answered_questionnaire'])
+        "data": student_data
     })
 
 
@@ -944,3 +1003,33 @@ def update_contact():
             "code": 400,
             "msg": "数据校验错误"
         })
+
+
+@student_pages.post("/avatar/upload")
+@student_required()
+def upload_avatar():
+    f = request.files.get("file")
+    if f is None:
+        return jsonify({"code": 400, "msg": "缺少 file"}), 400
+
+    if request.content_length is not None and int(request.content_length) > 10 * 1024 * 1024:
+        return jsonify({"code": 400, "msg": "头像最大 10MB"}), 400
+
+    filename = secure_filename(f.filename or "")
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_AVATAR_EXTS:
+        return jsonify({"code": 400, "msg": "仅支持 png/jpg/jpeg 格式"}), 400
+
+    save_dir = _avatar_dir()
+    os.makedirs(save_dir, exist_ok=True)
+
+    for old_ext in ALLOWED_AVATAR_EXTS:
+        old_path = os.path.join(save_dir, f"{current_user.id}{old_ext}")
+        if os.path.exists(old_path):
+            os.remove(old_path)
+
+    out_name = f"{current_user.id}{ext}"
+    out_path = os.path.join(save_dir, out_name)
+    f.save(out_path)
+    url = f"/static/uploads/student_avatar/{out_name}?t={int(time.time())}"
+    return jsonify({"code": 200, "msg": "success", "data": {"url": url}})
