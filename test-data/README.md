@@ -13,10 +13,10 @@
 2. 清空并重建业务测试数据（保留系统设置与问卷结构）：
    - 1 个管理员账号
    - 20 个学生账号（10 男 + 10 女）
-   - 学生随机资料（qq/wechat/contact/mbti/province）
+   - 学生随机资料（qq/wechat/contact/mbti/province；contact 为三个词、分号分隔）
    - 每个学生都填写问卷，且每题随机权重
    - 每个性别：4 人满队 + 2 人半满队 + 4 人未组队
-3. 生成学生头像到 `RMMT-API/static/uploads/student_avatar`
+3. 为**非满员队**学生生成随机色头像到 `RMMT-API/static/uploads/student_avatar`（满员队学生无头像文件）
 4. 生成账号表 `RMMT-API/test-data/accounts.csv`
 
 ## 运行示例

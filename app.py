@@ -22,7 +22,16 @@ app.register_blueprint(admin_pages, url_prefix="/api/admin")
 app.register_blueprint(student_pages, url_prefix="/api/student")
 
 # 跨域支持（本地开发允许前端 origin；生产环境建议用环境变量配置）
-_ALLOWED_ORIGINS = {"http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://127.0.0.1:5174"}
+_ALLOWED_ORIGINS = {
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "http://localhost:5273",
+    "http://127.0.0.1:5273",
+    "http://localhost:5274",
+    "http://127.0.0.1:5274",
+}
 CORS(
     app,
     origins=list(_ALLOWED_ORIGINS),

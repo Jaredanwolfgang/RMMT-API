@@ -14,7 +14,7 @@ What this script does:
        * 4 students in a full team
        * 2 students in a half team
        * 4 students with no team
-5) Generates simple avatar PNG files for all students.
+5) Generates simple avatar PNG files for students who are not in a full team (满员队不生成头像).
 6) Exports admin/student login accounts to RMMT-API/test-data/accounts.csv.
 """
 
@@ -77,16 +77,28 @@ MBTI_TYPES = [
     "ESFP",
 ]
 
+# 每词 ≤12 字符，与前端「三个词、每词最多 12 字符」一致
 INTEREST_WORDS = [
-    "music",
+    "read",
     "coding",
-    "sports",
+    "running",
+    "film",
+    "gaming",
+    "art",
+    "travel",
+    "java",
+    "ruby",
+    "golf",
+    "yoga",
+    "swimming",
+    "drawing",
+    "hiking",
+    "music",
     "reading",
     "movies",
-    "travel",
     "design",
     "fitness",
-    "games",
+    "basketball",
     "photography",
 ]
 
@@ -231,8 +243,9 @@ def random_name(rng: random.Random, gender: int, idx: int) -> str:
 
 
 def random_contact(rng: random.Random) -> str:
+    """三个词，与前端一致用英文分号分隔（无空格）。"""
     picks = rng.sample(INTEREST_WORDS, 3)
-    return " / ".join(picks)
+    return ";".join(picks)
 
 
 def upsert_system_setting(cur, key: str, value: str) -> None:
@@ -488,6 +501,12 @@ def seed_data(cur, rng: random.Random, admin_email: str, admin_password: str, st
 
     avatar_dir = api_root / "static" / "uploads" / "student_avatar"
     avatar_dir.mkdir(parents=True, exist_ok=True)
+    # 避免上次 seed 留下的 png 让满员学生仍显示头像
+    for p in avatar_dir.glob("*.png"):
+        try:
+            p.unlink()
+        except OSError:
+            pass
 
     all_students: list[dict[str, Any]] = []
     all_answers: list[tuple[str, str, int, float]] = []
@@ -555,11 +574,12 @@ def seed_data(cur, rng: random.Random, admin_email: str, admin_password: str, st
             for pid, payload in page_payloads.items():
                 all_page_answers.append((int(sid), pid, json.dumps(payload, ensure_ascii=False)))
 
-            # write random-color avatar png
-            r = rng.randint(30, 220)
-            g = rng.randint(30, 220)
-            b = rng.randint(30, 220)
-            create_color_png(avatar_dir / f"{sid}.png", r, g, b)
+            # 组队已满员（每性别 4 人一队）的学生不生成随机头像
+            if team_status != "full_team":
+                r = rng.randint(30, 220)
+                g = rng.randint(30, 220)
+                b = rng.randint(30, 220)
+                create_color_png(avatar_dir / f"{sid}.png", r, g, b)
 
     # insert students
     for st in all_students:

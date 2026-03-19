@@ -7,3 +7,6 @@ __pycache__
 sql
 log
 .DS_Store
+
+# 本地上传的头像等，勿提交
+static/uploads/
