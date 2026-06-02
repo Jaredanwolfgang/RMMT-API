@@ -41,3 +41,5 @@ Contributions are welcome! For major changes, please open an issue first to disc
 ## License
 
 This project is licensed under the GPL License - see the [LICENSE](LICENSE.md) file for details.
+
+<!-- commit-test: 2026-06-02 -->

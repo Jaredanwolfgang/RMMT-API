@@ -1,12 +1,15 @@
 import copy
 import datetime
+import os
+import uuid
 from functools import wraps
 
 import bcrypt
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import create_access_token, verify_jwt_in_request, get_jwt, current_user
 from sqlalchemy.orm import joinedload
 from sqlalchemy import or_, func
+from werkzeug.utils import secure_filename
 
 from database import db_session
 from models import Admin, Student, Team, ExchangingNeed, CustomQuestionnaireItem, SystemSetting, QuestionnaireItem, \
@@ -448,6 +451,42 @@ def system_setting_delete():
         "code": 200,
         "msg": "success"
     })
+
+
+@admin_pages.post('/system_style/upload')
+@admin_required()
+def system_style_upload():
+    """
+    Upload system style assets (login background / student logo).
+    Returns a URL under /static/uploads/...
+    """
+    kind = request.args.get("kind", "")
+    if kind not in ("login_bg", "student_logo"):
+        return jsonify({"code": 400, "msg": "kind 参数错误"}), 400
+
+    f = request.files.get("file")
+    if f is None:
+        return jsonify({"code": 400, "msg": "缺少 file"}), 400
+
+    # size limit: 10MB
+    if request.content_length is not None and int(request.content_length) > 10 * 1024 * 1024:
+        return jsonify({"code": 400, "msg": "图片最大 10MB"}), 400
+
+    filename = secure_filename(f.filename or "")
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in (".png", ".jpg", ".jpeg"):
+        return jsonify({"code": 400, "msg": "仅支持 png/jpg/jpeg 格式"}), 400
+
+    rel_dir = os.path.join("uploads", "system_style")
+    abs_dir = os.path.join(current_app.root_path, "static", rel_dir)
+    os.makedirs(abs_dir, exist_ok=True)
+
+    out_name = f"{kind}-{uuid.uuid4().hex}{ext}"
+    abs_path = os.path.join(abs_dir, out_name)
+    f.save(abs_path)
+
+    url = f"/static/{rel_dir}/{out_name}"
+    return jsonify({"code": 200, "msg": "success", "data": {"url": url}})
 
 
 @admin_pages.get('/announcement/list')

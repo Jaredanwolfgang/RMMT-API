@@ -3,3 +3,9 @@ class GeneralConfig:
     JWT_SECRET_KEY = "R2xpmzp1F9QcpHn9"
     DATABASE_LOG = False
     ASYNC_JOB_SCAN_INTERVAL = 10  # in seconds
+    AI_API_KEY = ""
+    AI_BASE_URL = "https://api.deepseek.com"
+    AI_MODEL = "deepseek-chat"
+    AI_TIMEOUT = 20
+    AI_SEARCH_CANDIDATE_LIMIT = 30
+    AI_EXPLANATION_CACHE_TTL = 86400

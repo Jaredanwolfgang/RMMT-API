@@ -1,5 +1,6 @@
 import decimal
 import json
+import os
 import numpy as np
 
 import arrow
@@ -8,19 +9,32 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from sqlalchemy.orm import joinedload
 
 import config
+from matching_v2 import calculate_match_v2
 from models import *
 
-from text2vec import cos_sim, SentenceModel
+
+_legacy_model = None
+_legacy_cos_sim = None
 
 
-model = SentenceModel()
+def _get_legacy_embedding_tools():
+    global _legacy_model, _legacy_cos_sim
+    if _legacy_model is None or _legacy_cos_sim is None:
+        from text2vec import cos_sim, SentenceModel
+        _legacy_cos_sim = cos_sim
+        _legacy_model = SentenceModel()
+    return _legacy_model, _legacy_cos_sim
+
+
+def get_matching_algorithm():
+    return os.getenv("MATCHING_ALGORITHM", "legacy").lower()
 
 def scan_students():
     if not is_in_calculating_time():
         output("当前时间不在算法匹配时间段内")
         return
     else:
-        output("开始进行算法匹配")
+        output("开始进行算法匹配({})".format(get_matching_algorithm()))
 
     students = db_session.query(Student).all()
 
@@ -79,6 +93,16 @@ def get_student_by_id(student_id, students):
 
 
 def get_score(from_student, to_student):
+    if get_matching_algorithm() == "v2":
+        result = calculate_match_v2(from_student, to_student, commit_vectors=db_session.commit)
+        output("score: {} numeric: {} text: {}".format(
+            result["match_score"],
+            result["numeric_score"],
+            result["text_score"],
+        ))
+        return result["match_score"]
+
+    model, cos_sim = _get_legacy_embedding_tools()
     to_student_questionnaire_answers = to_student.questionnaire_answers
     from_student_questionnaire_answers = from_student.questionnaire_answers
 
