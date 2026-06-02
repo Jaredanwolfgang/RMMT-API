@@ -7,12 +7,13 @@ What this script does:
 3) Resets business data (admins/students/teams/answers and related tables).
 4) Inserts:
    - 1 admin account
-   - 32 student accounts (16 male, 16 female) with random profile data by default
+   - 120 student accounts (60 male, 60 female) with random profile data by default
    - questionnaire answers for all students, each with random weights
    - team distribution per gender:
-       * 4 students in a full team
-       * 2 students in a half team
-       * 4 students with no team
+       * 2 full teams of 4 students
+       * 8 teams of 3 students
+       * 10 teams of 2 students
+       * remaining students with no team
 5) Generates simple avatar PNG files for students who are not in a full team (满员队不生成头像).
 6) Exports admin/student login accounts to RMMT-API/test-data/accounts.csv.
 """
@@ -76,6 +77,8 @@ MBTI_TYPES = [
     "ESFP",
 ]
 
+TEAM_SIZE_PLAN_PER_GENDER = [4, 4] + [3] * 8 + [2] * 10
+
 # 每词 ≤12 字符，与前端「三个词、每词最多 12 字符」一致
 INTEREST_WORDS = [
     "read",
@@ -99,6 +102,45 @@ INTEREST_WORDS = [
     "fitness",
     "basketball",
     "photography",
+    "football",
+    "volleyball",
+    "badminton",
+    "tennis",
+    "tabletennis",
+    "baseball",
+    "softball",
+    "billiards",
+    "frisbee",
+    "skating",
+    "climbing",
+    "dance",
+    "rap",
+    "kpop",
+    "jpop",
+    "idol",
+    "concerts",
+    "anime",
+    "cosplay",
+    "esports",
+    "lol",
+    "valorant",
+    "genshin",
+    "minecraft",
+    "switch",
+    "steam",
+    "chess",
+    "boardgames",
+    "podcast",
+    "vlog",
+    "cooking",
+    "baking",
+    "coffee",
+    "cycling",
+    "calligraphy",
+    "makeup",
+    "fashion",
+    "drama",
+    "musical",
 ]
 
 MVP_QUESTIONNAIRE = [
@@ -146,7 +188,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--admin-email", default="admin@example.com")
     parser.add_argument("--admin-password", default="Admin123456")
     parser.add_argument("--student-password", default="Student123")
-    parser.add_argument("--student-count", type=int, default=32, help="Total generated students, split evenly by gender")
+    parser.add_argument("--student-count", type=int, default=120, help="Total generated students, split evenly by gender")
     parser.add_argument("--seed", type=int, default=20260319, help="Random seed for reproducible data")
     return parser.parse_args()
 
@@ -271,7 +313,7 @@ def ensure_questionnaire(cur) -> None:
         for index_in_page, (item_id, item_title, options) in enumerate(items, start=1):
             item_type = "textarea" if options is None else "radio"
             params = {"placeholder": "请输入你的回答"} if options is None else {"options": options}
-            weight = 0 if options is None else 1
+            weight = 1
             cur.execute(
                 """
                 INSERT INTO questionnaire_items(
@@ -297,6 +339,8 @@ def ensure_questionnaire(cur) -> None:
 def reset_business_data(cur) -> None:
     # keep questionnaire and system settings, reset user/business data
     tables = [
+        "ai_cache_entries",
+        "ai_profiles",
         "matching_scores",
         "custom_questionnaire_answers",
         "custom_questionnaire_items",
@@ -312,7 +356,17 @@ def reset_business_data(cur) -> None:
     ]
     cur.execute("SET FOREIGN_KEY_CHECKS=0")
     for table in tables:
-        cur.execute(f"DELETE FROM {table}")
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = %s
+            """,
+            (table,),
+        )
+        if int(cur.fetchone()["cnt"]) > 0:
+            cur.execute(f"DELETE FROM {table}")
     cur.execute("SET FOREIGN_KEY_CHECKS=1")
 
 
@@ -356,7 +410,7 @@ def generate_answer_and_weight(rng: random.Random, item: dict[str, Any]) -> tupl
     if default_weight < 0:
         weight = default_weight
     else:
-        weight = float(rng.randint(1, 20))
+        weight = float(rng.randint(1, 3))
     return answer, weight
 
 
@@ -367,30 +421,74 @@ def generate_text_answer(rng: random.Random, item_id: str) -> str:
             "我性格外向，喜欢和朋友聊天，专业课之外会参加社团和运动。",
             "我比较独立，喜欢安静稳定的生活节奏，遇到公共事务会主动沟通。",
             "我平时状态比较松弛，喜欢把宿舍当成恢复精力的地方，也愿意互相照应。",
+            "我做事偏细致，喜欢提前规划DDL，平时会用待办清单安排学习和生活。",
+            "我有点社恐但不难相处，熟悉之后会变得很能聊，也愿意一起吃饭。",
+            "我喜欢热闹但会注意分寸，宿舍有人休息时会主动戴耳机和降低音量。",
+            "我比较随和，不太计较小事，但公共规则希望大家能一起商量清楚。",
+            "我平时喜欢运动和看比赛，作息会尽量规律，考试周会更专注学习。",
+            "我喜欢探索新东西，游戏、音乐、展览都会尝试，遇到问题倾向直接沟通。",
+            "我是效率型选手，白天学习比较集中，晚上希望能有相对安静的休息环境。",
+            "我比较宅，喜欢在宿舍看剧、打游戏或做手工，但会注意公共空间整洁。",
         ],
         "q_mvp_interests": [
             "喜欢音乐、电影、阅读和散步，偶尔会拍照记录生活。",
             "喜欢游戏、篮球、健身和看比赛，周末经常运动。",
             "喜欢编程、科幻、桌游和动漫，空闲时会折腾小项目。",
             "喜欢旅行、美食、摄影和逛展，也喜欢和朋友一起探索城市。",
+            "喜欢羽毛球、乒乓球和排球，也会关注校园比赛和体育社团活动。",
+            "喜欢足球、篮球和台球，平时会约朋友打球或者一起看比赛。",
+            "喜欢主机游戏、Steam 独立游戏和合作闯关，也会看电竞比赛。",
+            "喜欢追星、看演唱会、刷舞台直拍，也会收集专辑和周边。",
+            "喜欢 K-pop、J-pop、音乐剧和现场演出，空闲时会学一点舞蹈。",
+            "喜欢原神、Minecraft、Switch 游戏和桌游，偏向轻松娱乐型玩家。",
+            "喜欢咖啡、烘焙、做饭和探店，周末会研究一些简单菜谱。",
+            "喜欢骑行、飞盘、爬山和城市漫步，更偏户外活动。",
+            "喜欢动漫、cosplay、手账和拍照，偶尔会参加同好活动。",
+            "喜欢播客、纪录片、阅读和写作，比较享受独处输入的时间。",
+            "喜欢美妆、穿搭、拍 vlog 和逛展，愿意一起分享生活灵感。",
+            "喜欢象棋、桌游、推理游戏和密室，偏爱需要策略和配合的活动。",
         ],
         "q_mvp_dorm_atmosphere": [
             "希望宿舍整体安静温暖，大家互相尊重边界，有事及时沟通。",
             "希望宿舍像朋友一样相处，可以一起吃饭聊天，但也保留个人空间。",
             "希望宿舍适合学习和休息，公共区域保持清爽，晚上尽量降低噪声。",
             "希望氛围轻松一点，大家可以分享日常，也能接受彼此不同节奏。",
+            "希望宿舍有明确但不死板的公共规则，比如卫生轮值和夜间音量提前说好。",
+            "希望宿舍可以偶尔一起玩游戏、看比赛或点外卖，但不强制社交。",
+            "希望大家互相包容，遇到作息差异时能提前说明，不用互相猜。",
+            "希望宿舍更偏学习型，考试周能一起自习，平时也能放松聊天。",
+            "希望宿舍是恢复能量的地方，白天可以热闹，夜里尽量安静。",
+            "希望室友之间像搭子一样，有共同活动最好，没有也能舒服相处。",
+            "希望公共空间干净、物品归位，大家都能自觉维护基本秩序。",
+            "希望氛围开放直接，谁有需求就说出来，别把矛盾积累到最后。",
         ],
         "q_mvp_representative_thing": [
             "一本随身笔记本，代表我喜欢记录想法和慢慢整理生活。",
             "一副耳机，代表我需要音乐陪伴，也重视自己的安静空间。",
             "一双跑鞋，代表我喜欢保持行动感，也愿意尝试新事情。",
             "一款合作游戏，代表我喜欢团队配合和轻松交流。",
+            "一颗篮球，代表我喜欢运动后的痛快感，也喜欢团队协作。",
+            "一支应援棒，代表我会认真喜欢舞台，也享受热烈的现场氛围。",
+            "一台 Switch，代表我喜欢轻松游戏，也愿意和朋友一起玩。",
+            "一杯手冲咖啡，代表我喜欢慢一点的生活节奏和小仪式感。",
+            "一张演唱会门票，代表我愿意为喜欢的事情投入时间和热情。",
+            "一个相机，代表我喜欢观察日常细节，也喜欢记录朋友和风景。",
+            "一块白板，代表我习惯把任务拆开，也喜欢清楚地安排计划。",
+            "一个桌游盒子，代表我喜欢规则明确但气氛轻松的交流。",
         ],
         "q_mvp_roommate_note": [
             "我睡前比较需要安静，如果要语音或外放，希望能提前说一声。",
             "我对公共区域卫生比较在意，外卖盒和垃圾希望当天处理。",
             "我偶尔会晚归或赶作业，但会尽量控制声音和灯光。",
             "我欢迎直接沟通，不太喜欢把小问题憋很久，大家商量着来最好。",
+            "我有时会早起运动，早上洗漱会尽量放轻动作，介意的话可以提前提醒我。",
+            "我可能会追比赛或舞台直播，激动时会戴耳机，尽量不影响别人休息。",
+            "我对香水和重口味外卖味道有点敏感，希望宿舍能及时通风。",
+            "我考试周会比较紧绷，希望那段时间宿舍能减少外放和深夜聊天。",
+            "我偶尔会和朋友语音开黑，会提前控制时间，太吵可以直接告诉我。",
+            "我不太擅长猜别人情绪，如果哪里不舒服，希望直接和我说。",
+            "我会带一些运动装备或周边，希望自己的物品区域能保持固定。",
+            "我偶尔会做简单食物，希望大家能接受轻微气味，也会及时清理。",
         ],
     }
     choices = profiles.get(item_id)
@@ -444,22 +542,6 @@ def seed_data(cur, rng: random.Random, admin_email: str, admin_password: str, st
     if not items:
         raise RuntimeError("No questionnaire_items found after initialization.")
 
-    # build page->items map for page_answer table
-    # create teams for each gender
-    team_ids: dict[str, int] = {}
-    for gender, gname in [(1, "male"), (2, "female")]:
-        cur.execute(
-            "INSERT INTO teams(gender, description) VALUES(%s,%s)",
-            (gender, f"{gname}-full-team"),
-        )
-        team_ids[f"{gname}_full"] = int(cur.lastrowid)
-
-        cur.execute(
-            "INSERT INTO teams(gender, description) VALUES(%s,%s)",
-            (gender, f"{gname}-half-team"),
-        )
-        team_ids[f"{gname}_half"] = int(cur.lastrowid)
-
     if student_count < 2 or student_count % 2 != 0:
         raise ValueError("--student-count 必须是大于等于 2 的偶数")
 
@@ -493,18 +575,35 @@ def seed_data(cur, rng: random.Random, admin_email: str, admin_password: str, st
         }
     ]
 
+    team_assignments: dict[int, tuple[int | None, str]] = {}
     for gender, sid_list in [(1, male_ids), (2, female_ids)]:
         gname = "male" if gender == 1 else "female"
-        for idx, sid in enumerate(sid_list):
-            if idx < 4:
-                team_id = team_ids[f"{gname}_full"]
+        cursor = 0
+        for team_index, size in enumerate(TEAM_SIZE_PLAN_PER_GENDER, start=1):
+            if cursor + size > len(sid_list):
+                break
+            cur.execute(
+                "INSERT INTO teams(gender, description) VALUES(%s,%s)",
+                (gender, f"{gname}-{size}-person-team-{team_index:02d}"),
+            )
+            team_id = int(cur.lastrowid)
+            if size >= 4:
                 team_status = "full_team"
-            elif idx < 6:
-                team_id = team_ids[f"{gname}_half"]
-                team_status = "half_team"
+            elif size == 3:
+                team_status = "three_person_team"
+            elif size == 2:
+                team_status = "two_person_team"
             else:
-                team_id = None
                 team_status = "no_team"
+            for sid in sid_list[cursor:cursor + size]:
+                team_assignments[int(sid)] = (team_id, team_status)
+            cursor += size
+
+        for sid in sid_list[cursor:]:
+            team_assignments[int(sid)] = (None, "no_team")
+
+        for idx, sid in enumerate(sid_list):
+            team_id, team_status = team_assignments[int(sid)]
 
             profile = {
                 "id": int(sid),

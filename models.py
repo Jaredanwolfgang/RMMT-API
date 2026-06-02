@@ -3,7 +3,7 @@ from copy import deepcopy
 
 import bcrypt
 from flask import jsonify
-from sqlalchemy import Column, DateTime, ForeignKey, String, TIMESTAMP, Text, text, BLOB
+from sqlalchemy import Column, DateTime, ForeignKey, String, TIMESTAMP, Text, text, BLOB, UniqueConstraint
 from sqlalchemy.dialects.mysql import BIGINT, INTEGER, TINYINT, DOUBLE, LONGTEXT
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
@@ -344,6 +344,33 @@ class MatchingScore(Base, SerializerMixin):
                               backref="received_matching_scores")
 
 
+class AIProfile(Base, SerializerMixin):
+    __tablename__ = 'ai_profiles'
+    __table_args__ = (
+        UniqueConstraint('subject_type', 'subject_id', name='uq_ai_profiles_subject'),
+    )
+
+    id = Column(INTEGER(11), primary_key=True)
+    subject_type = Column(String(32), nullable=False, index=True)
+    subject_id = Column(BIGINT(20), nullable=False, index=True)
+    fingerprint = Column(String(64), nullable=False)
+    profile_json = Column(LONGTEXT, nullable=False)
+    created_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+
+
+class AICacheEntry(Base, SerializerMixin):
+    __tablename__ = 'ai_cache_entries'
+
+    id = Column(INTEGER(11), primary_key=True)
+    cache_type = Column(String(64), nullable=False, index=True)
+    cache_key = Column(String(128), nullable=False, unique=True)
+    value_json = Column(LONGTEXT, nullable=False)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+
+
 class QuestionnaireAnswer(Base, SerializerMixin):
     __tablename__ = 'questionnaire_answers'
 
@@ -454,4 +481,3 @@ if __name__ == "__main__":
 
     db_session.commit()
     print("✅ 默认 system_settings 已初始化")
-

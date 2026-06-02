@@ -15,6 +15,18 @@ docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' rmm
 
 ## 2) 启动后端 API（5001）
 
+后端会自动读取 `RMMT-API/.env` 中的本地环境变量，适合长期保存本机开发密钥。示例：
+
+```bash
+cd /home/xxc/projects/RMMT-my-feature-deploy/RMMT-API
+cat > .env <<'EOF'
+AI_API_KEY=REPLACE_WITH_AI_API_KEY
+AI_BASE_URL=https://api.deepseek.com
+AI_MODEL=deepseek-chat
+EOF
+chmod 600 .env
+```
+
 ```bash
 cd /home/xxc/projects/RMMT-my-feature-deploy/RMMT-API
 source venv/bin/activate
@@ -64,10 +76,10 @@ python test-data/seed_test_data.py \
 ```
 
 导入结果：
-- 若数据库无问卷：自动生成 3 个分页、9 题（每页 3 题）
-- 1 个管理员 + 20 个学生（10 男 10 女）
-- 学生资料、问卷答案、题目权重随机生成
-- 每个性别：4 人满队、2 人半满队、4 人未组队
+- 重建 MVP 问卷：6 个分页、19 题
+- 1 个管理员 + 120 个学生（60 男 60 女）
+- 学生资料、问卷答案随机生成；题目默认权重为 1，学生答案权重在 1-3 间随机
+- 每个性别：2 个 4 人满队、8 个 3 人队、10 个 2 人队、其余未组队
 - 账号密码表自动写入：`/home/xxc/projects/RMMT-my-feature-deploy/RMMT-API/test-data/accounts.csv`
 
 默认登录密码：

@@ -12,7 +12,9 @@ from werkzeug.utils import secure_filename
 from database import db_session
 import json
 
-from matching_v2 import calculate_match_v2
+from ai_client import AIClientError
+from ai_roommate import explain_match, explain_team_match, search_roommates, search_dorm_teams
+from matching_v2 import MatchV2Config, calculate_match_v2
 from models import Student, QuestionnaireItem, QuestionnaireAnswer, MatchingScore, Team, TeamInvitation, \
     TeamRequest, get_system_setting, Announcement, QuestionnairePage, QuestionnairePageAnswer
     
@@ -385,7 +387,29 @@ def team_recommend_teammates():
     })
 
 
+def _matching_v2_config_from_request():
+    numeric_weight = request.args.get("numeric_weight", None)
+    text_weight = request.args.get("text_weight", None)
+    if numeric_weight is None and text_weight is None and request.is_json and request.json is not None:
+        numeric_weight = request.json.get("numeric_weight", None)
+        text_weight = request.json.get("text_weight", None)
+    if numeric_weight is None and text_weight is None:
+        return None, None
+    try:
+        numeric_weight = float(numeric_weight)
+        text_weight = float(text_weight)
+    except (TypeError, ValueError):
+        return None, (jsonify({"code": 400, "msg": "匹配权重格式错误"}), 400)
+    if numeric_weight < 0 or text_weight < 0 or abs((numeric_weight + text_weight) - 1.0) > 0.001:
+        return None, (jsonify({"code": 400, "msg": "选择题权重与文本题权重之和必须等于 1"}), 400)
+    return MatchV2Config(alpha=numeric_weight, beta=text_weight), None
+
+
 def team_recommend_teammates_v2():
+    match_config, error_response = _matching_v2_config_from_request()
+    if error_response is not None:
+        return error_response
+
     same_gender_students = db_session.query(Student) \
         .where(Student.gender == current_user.gender) \
         .where(Student.id != current_user.id) \
@@ -405,7 +429,7 @@ def team_recommend_teammates_v2():
         item['avatar_url'] = get_student_avatar_url(piece.id)
         item['team_students_num'] = team_students_num
 
-        match_result = calculate_match_v2(current_user, piece, commit_vectors=db_session.commit)
+        match_result = calculate_match_v2(current_user, piece, config=match_config, commit_vectors=db_session.commit)
         item.update(match_result)
         students_with_score.append(item)
 
@@ -420,6 +444,333 @@ def team_recommend_teammates_v2():
             "students_with_no_score": []
         }
     })
+
+
+def _team_max_student_count():
+    try:
+        return int(get_system_setting("team_max_student_count", 4))
+    except (TypeError, ValueError):
+        return 4
+
+
+def _student_card_data(student):
+    item = student.to_dict(only=['id', 'name', 'contact', 'qq', 'wechat', 'province', 'mbti'])
+    item['avatar_url'] = get_student_avatar_url(student.id)
+    item['team_students_num'] = 0
+    if student.team_id is not None and student.team is not None:
+        item['team_students_num'] = len(student.team.students or [])
+    return item
+
+
+def _load_current_team_students():
+    if current_user.team_id is None:
+        student = db_session.query(Student) \
+            .where(Student.id == current_user.id) \
+            .options(joinedload(Student.team).joinedload(Team.students),
+                     joinedload(Student.questionnaire_answers).joinedload(QuestionnaireAnswer.item)) \
+            .first()
+        return [student]
+
+    return db_session.query(Student) \
+        .where(Student.team_id == current_user.team_id) \
+        .options(joinedload(Student.team).joinedload(Team.students),
+                 joinedload(Student.questionnaire_answers).joinedload(QuestionnaireAnswer.item)) \
+        .all()
+
+
+def _candidate_team_sizes(current_team_size, team_max):
+    if current_team_size <= 0 or current_team_size >= team_max:
+        return []
+    if current_team_size == 1:
+        sizes = [2, team_max - 1]
+    else:
+        sizes = [team_max - current_team_size]
+    return sorted({size for size in sizes if 1 <= size < team_max})
+
+
+def _candidate_key(team_id, members):
+    if team_id is not None:
+        return f"team:{team_id}"
+    if len(members) == 1:
+        return f"solo:{members[0].id}"
+    return "virtual:" + ",".join(str(s.id) for s in members)
+
+
+def _team_match_score(current_students, candidate_students, match_config=None):
+    scores = []
+    for source in current_students:
+        for target in candidate_students:
+            result = calculate_match_v2(source, target, config=match_config, commit_vectors=db_session.commit)
+            scores.append(float(result.get("match_score", 0)))
+    if not scores:
+        return 0.0
+    return round(sum(scores) / len(scores), 1)
+
+
+def _team_pairwise_scores(current_students, candidate_students, match_config=None):
+    pairs_by_candidate = {student.id: [] for student in candidate_students}
+    all_scores = []
+    for source in current_students:
+        for target in candidate_students:
+            result = calculate_match_v2(source, target, config=match_config, commit_vectors=db_session.commit)
+            score = round(float(result.get("match_score", 0)), 1)
+            all_scores.append(score)
+            pairs_by_candidate[target.id].append({
+                "current_student_id": source.id,
+                "current_student_name": source.name,
+                "candidate_student_id": target.id,
+                "score": score,
+            })
+    average = round(sum(all_scores) / len(all_scores), 1) if all_scores else 0.0
+    return average, pairs_by_candidate
+
+
+def _recommend_dorm_team_rows(match_config=None):
+    team_max = _team_max_student_count()
+    current_students = [s for s in _load_current_team_students() if s is not None]
+    current_ids = {s.id for s in current_students}
+    current_team_size = len(current_students)
+    candidate_sizes = _candidate_team_sizes(current_team_size, team_max)
+    if not current_students or not candidate_sizes:
+        return current_students, []
+
+    students = db_session.query(Student) \
+        .where(Student.gender == current_user.gender) \
+        .where(Student.id.notin_(current_ids)) \
+        .options(joinedload(Student.team).joinedload(Team.students),
+                 joinedload(Student.questionnaire_answers).joinedload(QuestionnaireAnswer.item)) \
+        .all()
+
+    teams = {}
+    solos = []
+    for student in students:
+        if student.team_id is None:
+            solos.append(student)
+            continue
+        teams.setdefault(student.team_id, []).append(student)
+
+    candidates = []
+    for team_id, members in teams.items():
+        if len(members) not in candidate_sizes:
+            continue
+        candidates.append({
+            "team_id": team_id,
+            "virtual": False,
+            "members": sorted(members, key=lambda item: item.id),
+        })
+
+    if 1 in candidate_sizes:
+        for student in solos:
+            candidates.append({
+                "team_id": None,
+                "virtual": True,
+                "members": [student],
+            })
+
+    rows = []
+    for candidate in candidates:
+        members = candidate["members"]
+        score, pairwise_scores = _team_pairwise_scores(current_students, members, match_config=match_config)
+        rows.append({
+            "candidate_key": _candidate_key(candidate["team_id"], members),
+            "team_id": candidate["team_id"],
+            "virtual": candidate["virtual"],
+            "member_count": len(members),
+            "match_score": score,
+            "score": score,
+            "members": members,
+            "pairwise_scores": pairwise_scores,
+        })
+
+    rows.sort(key=lambda item: item["match_score"], reverse=True)
+    return current_students, rows
+
+
+def _serialize_dorm_team_row(row):
+    members = []
+    for student in row["members"]:
+        item = _student_card_data(student)
+        pairwise_scores = row.get("pairwise_scores", {}).get(student.id, [])
+        if pairwise_scores:
+            item["score"] = round(sum(float(piece.get("score", 0)) for piece in pairwise_scores) / len(pairwise_scores), 1)
+        else:
+            item["score"] = row["match_score"]
+        members.append(item)
+    return {
+        "candidate_key": row["candidate_key"],
+        "team_id": row["team_id"],
+        "virtual": row["virtual"],
+        "member_count": row["member_count"],
+        "match_score": row["match_score"],
+        "score": row["score"],
+        "members": members,
+    }
+
+
+@student_pages.get('/team/recommend_dorm_teams')
+@student_required()
+def team_recommend_dorm_teams():
+    match_config, error_response = _matching_v2_config_from_request()
+    if error_response is not None:
+        return error_response
+
+    current_students, rows = _recommend_dorm_team_rows(match_config=match_config)
+    team_max = _team_max_student_count()
+    return jsonify({
+        "code": 200,
+        "msg": "success",
+        "data": {
+            "algorithm": "matching_v2",
+            "team_max_student_count": team_max,
+            "current_team_size": len(current_students),
+            "candidate_sizes": _candidate_team_sizes(len(current_students), team_max),
+            "teams_with_score": [_serialize_dorm_team_row(row) for row in rows],
+        }
+    })
+
+
+@student_pages.post('/ai/match_explanation')
+@student_required()
+def ai_match_explanation():
+    if request.json is None:
+        return jsonify({"code": 400, "msg": "请求体不能为空"}), 400
+    target_student_id = request.json.get("target_student_id")
+    search_query = str(request.json.get("search_query") or "").strip()
+    search_highlights = request.json.get("search_highlights") or []
+    if target_student_id is None:
+        return jsonify({"code": 400, "msg": "缺少 target_student_id"}), 400
+    try:
+        target_student_id = int(target_student_id)
+    except (TypeError, ValueError):
+        return jsonify({"code": 400, "msg": "target_student_id 格式错误"}), 400
+
+    target_student = db_session.query(Student) \
+        .where(Student.id == target_student_id) \
+        .options(joinedload(Student.questionnaire_answers).joinedload(QuestionnaireAnswer.item)) \
+        .first()
+    if target_student is None:
+        return jsonify({"code": 404, "msg": "学生不存在"}), 404
+    if target_student.id == current_user.id:
+        return jsonify({"code": 400, "msg": "不能解释自己和自己的匹配"}), 400
+    if target_student.gender != current_user.gender:
+        return jsonify({"code": 400, "msg": "不支持男女混寝匹配解释"}), 400
+
+    try:
+        match_config, error_response = _matching_v2_config_from_request()
+        if error_response is not None:
+            return error_response
+        data = explain_match(
+            current_user,
+            target_student,
+            search_query=search_query or None,
+            search_highlights=search_highlights if isinstance(search_highlights, list) else [],
+            match_config=match_config,
+        )
+    except AIClientError as exc:
+        return jsonify({"code": 503, "msg": str(exc)}), 503
+    except Exception as exc:
+        current_app.logger.exception("AI match explanation failed")
+        return jsonify({"code": 500, "msg": f"AI解释生成失败：{exc}"}), 500
+
+    return jsonify({"code": 200, "msg": "success", "data": data})
+
+
+@student_pages.post('/ai/team_match_explanation')
+@student_required()
+def ai_team_match_explanation():
+    if request.json is None:
+        return jsonify({"code": 400, "msg": "请求体不能为空"}), 400
+    candidate_key = str(request.json.get("candidate_key") or "").strip()
+    search_query = str(request.json.get("search_query") or "").strip()
+    search_highlights = request.json.get("search_highlights") or []
+    if not candidate_key:
+        return jsonify({"code": 400, "msg": "缺少 candidate_key"}), 400
+
+    try:
+        match_config, error_response = _matching_v2_config_from_request()
+        if error_response is not None:
+            return error_response
+        current_students, rows = _recommend_dorm_team_rows(match_config=match_config)
+        target = next((row for row in rows if row["candidate_key"] == candidate_key), None)
+        if target is None:
+            return jsonify({"code": 404, "msg": "候选宿舍不存在或不再可匹配"}), 404
+        data = explain_team_match(
+            current_students,
+            target["members"],
+            target["match_score"],
+            search_query=search_query or None,
+            search_highlights=search_highlights if isinstance(search_highlights, list) else [],
+        )
+    except AIClientError as exc:
+        return jsonify({"code": 503, "msg": str(exc)}), 503
+    except Exception as exc:
+        current_app.logger.exception("AI team match explanation failed")
+        return jsonify({"code": 500, "msg": f"AI解释生成失败：{exc}"}), 500
+
+    return jsonify({"code": 200, "msg": "success", "data": data})
+
+
+@student_pages.post('/ai/search_roommates')
+@student_required()
+def ai_search_roommates():
+    if request.json is None:
+        return jsonify({"code": 400, "msg": "请求体不能为空"}), 400
+    query = str(request.json.get("query") or "").strip()
+    if not query:
+        return jsonify({"code": 400, "msg": "搜索内容不能为空"}), 400
+    candidate_ids = request.json.get("candidate_ids")
+    candidate_limit = request.json.get("candidate_limit", None)
+    if candidate_ids is not None and not isinstance(candidate_ids, list):
+        return jsonify({"code": 400, "msg": "candidate_ids 必须是数组"}), 400
+    if candidate_ids is not None:
+        try:
+            candidate_ids = [int(x) for x in candidate_ids]
+        except (TypeError, ValueError):
+            return jsonify({"code": 400, "msg": "candidate_ids 包含非法 id"}), 400
+
+    try:
+        data = search_roommates(current_user, query, candidate_ids=candidate_ids, candidate_limit=candidate_limit)
+    except AIClientError as exc:
+        return jsonify({"code": 503, "msg": str(exc)}), 503
+    except Exception as exc:
+        current_app.logger.exception("AI roommate search failed")
+        return jsonify({"code": 500, "msg": f"AI搜索失败：{exc}"}), 500
+
+    return jsonify({"code": 200, "msg": "success", "data": data})
+
+
+@student_pages.post('/ai/search_dorm_teams')
+@student_required()
+def ai_search_dorm_teams():
+    if request.json is None:
+        return jsonify({"code": 400, "msg": "请求体不能为空"}), 400
+    query = str(request.json.get("query") or "").strip()
+    if not query:
+        return jsonify({"code": 400, "msg": "搜索内容不能为空"}), 400
+    candidate_keys = request.json.get("candidate_keys")
+    candidate_limit = request.json.get("candidate_limit", None)
+    if candidate_keys is not None and not isinstance(candidate_keys, list):
+        return jsonify({"code": 400, "msg": "candidate_keys 必须是数组"}), 400
+
+    try:
+        match_config, error_response = _matching_v2_config_from_request()
+        if error_response is not None:
+            return error_response
+        current_students, rows = _recommend_dorm_team_rows(match_config=match_config)
+        data = search_dorm_teams(
+            current_students,
+            query,
+            rows,
+            candidate_keys=candidate_keys,
+            candidate_limit=candidate_limit,
+        )
+    except AIClientError as exc:
+        return jsonify({"code": 503, "msg": str(exc)}), 503
+    except Exception as exc:
+        current_app.logger.exception("AI dorm team search failed")
+        return jsonify({"code": 500, "msg": f"AI搜索失败：{exc}"}), 500
+
+    return jsonify({"code": 200, "msg": "success", "data": data})
 
 
 # !!important!! 不推荐邀请同学直接进入队伍！！ 这样很可能会忽视队伍里的其他同学 一定要确定每个人的生活习惯都和自己的没有冲突
