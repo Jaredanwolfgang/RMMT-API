@@ -12,6 +12,7 @@ from werkzeug.utils import secure_filename
 from database import db_session
 import json
 
+from matching_v2 import calculate_match_v2
 from models import Student, QuestionnaireItem, QuestionnaireAnswer, MatchingScore, Team, TeamInvitation, \
     TeamRequest, get_system_setting, Announcement, QuestionnairePage, QuestionnairePageAnswer
     
@@ -324,6 +325,10 @@ def questionnaire_set_answers():
 @student_pages.get('/team/recommend_teammates')
 @student_required()
 def team_recommend_teammates():
+    algorithm = request.args.get("algorithm", "").lower()
+    if algorithm == "v2":
+        return team_recommend_teammates_v2()
+
     # 兼容两种分数方向：
     # 1) from=对方, to=我（原始推荐方向）
     # 2) from=我, to=对方（回退方向，避免因任务中断导致大厅全是无分）
@@ -376,6 +381,43 @@ def team_recommend_teammates():
         "data": {
             "students_with_score": construct_data,
             "students_with_no_score": students_with_no_score_data
+        }
+    })
+
+
+def team_recommend_teammates_v2():
+    same_gender_students = db_session.query(Student) \
+        .where(Student.gender == current_user.gender) \
+        .where(Student.id != current_user.id) \
+        .options(joinedload(Student.questionnaire_answers)) \
+        .all()
+
+    students_with_score = []
+
+    for piece in same_gender_students:
+        team_students_num = 0
+        if piece.team_id is not None:
+            team_students_num = db_session.query(Student) \
+                .where(Student.team_id == piece.team_id) \
+                .count()
+
+        item = piece.to_dict(only=['id', 'name', 'contact', 'qq', 'wechat', 'province', 'mbti'])
+        item['avatar_url'] = get_student_avatar_url(piece.id)
+        item['team_students_num'] = team_students_num
+
+        match_result = calculate_match_v2(current_user, piece, commit_vectors=db_session.commit)
+        item.update(match_result)
+        students_with_score.append(item)
+
+    construct_data = sorted(students_with_score, key=lambda x: x['match_score'], reverse=True)
+
+    return jsonify({
+        "code": 200,
+        "msg": "success",
+        "data": {
+            "algorithm": "matching_v2",
+            "students_with_score": construct_data,
+            "students_with_no_score": []
         }
     })
 

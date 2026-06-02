@@ -3,12 +3,11 @@
 Seed local RMMT test data.
 
 What this script does:
-1) Checks whether questionnaire items already exist.
-2) If no questionnaire exists, creates 3 pages and 9 test questions (3 per page).
+1) Rebuilds the MVP questionnaire with 6 pages and 19 questions.
 3) Resets business data (admins/students/teams/answers and related tables).
 4) Inserts:
    - 1 admin account
-   - 20 student accounts (10 male, 10 female) with random profile data
+   - 32 student accounts (16 male, 16 female) with random profile data by default
    - questionnaire answers for all students, each with random weights
    - team distribution per gender:
        * 4 students in a full team
@@ -102,97 +101,38 @@ INTEREST_WORDS = [
     "photography",
 ]
 
-QUESTION_BANK = [
-    {
-        "title": "What is your usual sleep schedule?",
-        "weight": 10,
-        "data_type": "string",
-        "params": {"options": ["Before 23:00", "23:00-01:00", "After 01:00"]},
-        "type": "select",
-    },
-    {
-        "title": "How much do you care about room cleanliness?",
-        "weight": 12,
-        "data_type": "string",
-        "params": {"options": ["Very much", "Normal", "Not much"]},
-        "type": "radio",
-    },
-    {
-        "title": "How sensitive are you to noise?",
-        "weight": 9,
-        "data_type": "string",
-        "params": {"options": ["Sensitive", "Medium", "Not sensitive"]},
-        "type": "select",
-    },
-    {
-        "title": "Your usual weekend style",
-        "weight": 8,
-        "data_type": "string",
-        "params": {"options": ["Study", "Workout", "Gaming", "Outdoors", "Movies"]},
-        "type": "checkbox",
-    },
-    {
-        "title": "Preferred room temperature (C)",
-        "weight": 7,
-        "data_type": "integer",
-        "params": {"placeholder": "e.g. 24"},
-        "type": "number",
-    },
-    {
-        "title": "How often do you communicate with roommates?",
-        "weight": 6,
-        "data_type": "string",
-        "params": {"options": ["Often", "Sometimes", "Rarely"]},
-        "type": "select",
-    },
-    {
-        "title": "When do you usually turn off lights?",
-        "weight": 7,
-        "data_type": "string",
-        "params": {"options": ["Before 22:30", "22:30-00:00", "After 00:00"]},
-        "type": "select",
-    },
-    {
-        "title": "Do you accept visitors in dorm room?",
-        "weight": 5,
-        "data_type": "string",
-        "params": {"options": ["Yes", "Only weekends", "No"]},
-        "type": "radio",
-    },
-    {
-        "title": "How do you handle shared expenses?",
-        "weight": 8,
-        "data_type": "string",
-        "params": {"options": ["AA strictly", "Flexible AA", "One pays first"]},
-        "type": "select",
-    },
-    {
-        "title": "Preferred study environment",
-        "weight": 9,
-        "data_type": "string",
-        "params": {"options": ["Quiet", "Background sound", "Any"]},
-        "type": "radio",
-    },
-    {
-        "title": "Hobbies you want roommates to share",
-        "weight": 4,
-        "data_type": "string",
-        "params": {"options": ["Sports", "Music", "Coding", "Anime", "Travel"]},
-        "type": "checkbox",
-    },
-    {
-        "title": "Any allergies or special notes?",
-        "weight": 5,
-        "data_type": "string",
-        "params": {"placeholder": "Optional short note"},
-        "type": "input",
-    },
-]
-
-QUESTIONNAIRE_PAGES = [
-    ("生活作息", "作息、清洁与日常习惯相关问题"),
-    ("学习社交", "学习与社交方式相关问题"),
-    ("宿舍偏好", "住宿偏好与补充信息"),
+MVP_QUESTIONNAIRE = [
+    ("基础生活习惯", "作息规律与日常节奏", [
+        ("q_mvp_sleep_time", "你通常几点睡觉？", ["22:00 前", "22:00–23:30", "23:30–01:00", "01:00–02:00", "02:00 后"]),
+        ("q_mvp_wake_time", "你通常几点起床？", ["7:00 前", "7:00–8:30", "8:30–10:00", "10:00–12:00", "12:00 后"]),
+        ("q_mvp_routine", "你的作息规律程度是？", ["非常规律", "比较规律", "一般", "有点不规律", "非常不规律"]),
+    ]),
+    ("卫生与公共空间", "整洁、打扫和公共空间偏好", [
+        ("q_mvp_cleanliness", "你平时对宿舍整洁程度的习惯是？", ["非常随意", "有点随意", "一般", "比较整洁", "非常整洁"]),
+        ("q_mvp_cleaning_frequency", "你希望宿舍公共区域多久打扫一次？", ["随缘", "每两周一次", "每周一次", "每周多次", "尽量每天保持干净"]),
+        ("q_mvp_smell_sensitivity", "你对气味、垃圾、外卖盒等问题的敏感程度是？", ["完全不敏感", "不太敏感", "一般", "比较敏感", "非常敏感"]),
+    ]),
+    ("噪声与安静程度", "宿舍声音、外放和夜间使用设备习惯", [
+        ("q_mvp_quietness", "你在宿舍通常有多安静？", ["非常安静", "比较安静", "一般", "偶尔会外放/语音", "经常外放/语音"]),
+        ("q_mvp_noise_sensitivity", "你对舍友制造声音的敏感程度是？", ["完全不敏感", "不太敏感", "一般", "比较敏感", "非常敏感"]),
+        ("q_mvp_night_computer", "你晚上是否经常使用电脑、打游戏、语音、看视频？", ["几乎不", "偶尔", "一般", "经常", "几乎每天"]),
+    ]),
+    ("社交与宿舍氛围", "舍友关系、社交能量和访客接受度", [
+        ("q_mvp_roommate_relation", "你理想中的舍友关系是？", ["互不打扰", "偶尔聊天", "可以一起吃饭/学习", "经常一起活动", "像朋友一样相处"]),
+        ("q_mvp_social_energy", "你的社交能量是？", ["很低，喜欢独处", "偏低", "一般", "偏高", "很高，喜欢热闹"]),
+        ("q_mvp_visitor_acceptance", "你接受舍友带朋友来宿舍的程度是？", ["尽量不要", "偶尔可以", "提前说就可以", "比较无所谓", "完全无所谓"]),
+    ]),
+    ("学习与生活节奏", "宿舍学习、工作和日常状态偏好", [
+        ("q_mvp_dorm_study", "你是否经常在宿舍学习或工作？", ["几乎不", "偶尔", "一半一半", "经常", "几乎每天"]),
+        ("q_mvp_dorm_state", "你在宿舍时更偏向哪种状态？", ["安静休息", "自己做自己的事", "学习/工作", "娱乐放松", "聊天互动"]),
+    ]),
+    ("文本题", "用于语义向量和后续解释的开放问题", [
+        ("q_mvp_self_intro", "请简单介绍一下你自己", None),
+        ("q_mvp_interests", "你的兴趣爱好是什么？", None),
+        ("q_mvp_dorm_atmosphere", "你喜欢什么样的宿舍氛围？", None),
+        ("q_mvp_representative_thing", "写一个能代表你的东西", None),
+        ("q_mvp_roommate_note", "有什么希望未来舍友提前知道的事情？", None),
+    ]),
 ]
 
 
@@ -206,6 +146,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--admin-email", default="admin@example.com")
     parser.add_argument("--admin-password", default="Admin123456")
     parser.add_argument("--student-password", default="Student123")
+    parser.add_argument("--student-count", type=int, default=32, help="Total generated students, split evenly by gender")
     parser.add_argument("--seed", type=int, default=20260319, help="Random seed for reproducible data")
     return parser.parse_args()
 
@@ -313,59 +254,44 @@ def ensure_schema(cur) -> None:
         cur.execute("ALTER TABLE questionnaire_items ADD COLUMN index_in_page INT DEFAULT 1")
 
 
-def ensure_questionnaire(cur, rng: random.Random) -> None:
-    cur.execute("SELECT COUNT(*) AS cnt FROM questionnaire_items")
-    count = int(cur.fetchone()["cnt"])
-    if count > 0:
-        # ensure at least one page exists and map old items to first page
-        cur.execute("SELECT id FROM questionnaire_pages ORDER BY `index` ASC LIMIT 1")
-        first_page = cur.fetchone()
-        if not first_page:
-            cur.execute(
-                "INSERT INTO questionnaire_pages(title, remark, `index`) VALUES(%s,%s,%s)",
-                ("Default Page", "Auto-created for legacy questionnaire items", 1),
-            )
-            page_id = int(cur.lastrowid)
-        else:
-            page_id = int(first_page["id"])
+def ensure_questionnaire(cur) -> None:
+    cur.execute("SET FOREIGN_KEY_CHECKS=0")
+    for table in ("matching_scores", "questionnaire_answers", "questionnaire_page_answers", "questionnaire_items", "questionnaire_pages"):
+        cur.execute(f"DELETE FROM {table}")
+    cur.execute("SET FOREIGN_KEY_CHECKS=1")
 
-        cur.execute("UPDATE questionnaire_items SET page_id=%s WHERE page_id IS NULL", (page_id,))
-        cur.execute("UPDATE questionnaire_items SET index_in_page=`index` WHERE index_in_page IS NULL OR index_in_page=0")
-        return
-
-    # no questionnaire found -> create 3 pages and 9 generated questions (3 per page)
-    page_ids: list[int] = []
-    for pidx, (title, remark) in enumerate(QUESTIONNAIRE_PAGES, start=1):
+    global_index = 1
+    for pidx, (title, remark, items) in enumerate(MVP_QUESTIONNAIRE, start=1):
         cur.execute(
             "INSERT INTO questionnaire_pages(title, remark, `index`) VALUES(%s,%s,%s)",
             (title, remark, pidx),
         )
-        page_ids.append(int(cur.lastrowid))
+        page_id = int(cur.lastrowid)
 
-    chosen = rng.sample(QUESTION_BANK, 9)
-    for idx, item in enumerate(chosen, start=1):
-        page_idx = (idx - 1) // 3
-        index_in_page = ((idx - 1) % 3) + 1
-        item_id = f"q_auto_{idx:02d}"
-        cur.execute(
-            """
-            INSERT INTO questionnaire_items(
-                id, title, weight, data_type, params, `index`, `type`, page_id, index_in_page
+        for index_in_page, (item_id, item_title, options) in enumerate(items, start=1):
+            item_type = "textarea" if options is None else "radio"
+            params = {"placeholder": "请输入你的回答"} if options is None else {"options": options}
+            weight = 0 if options is None else 1
+            cur.execute(
+                """
+                INSERT INTO questionnaire_items(
+                    id, title, weight, data_type, params, `index`, `type`, page_id, index_in_page
+                )
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    item_id,
+                    item_title,
+                    weight,
+                    "string",
+                    json.dumps(params, ensure_ascii=False),
+                    global_index,
+                    item_type,
+                    page_id,
+                    index_in_page,
+                ),
             )
-            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            """,
-            (
-                item_id,
-                item["title"],
-                item["weight"],
-                item["data_type"],
-                json.dumps(item["params"], ensure_ascii=False),
-                idx,
-                item["type"],
-                page_ids[page_idx],
-                index_in_page,
-            ),
-        )
+            global_index += 1
 
 
 def reset_business_data(cur) -> None:
@@ -412,6 +338,7 @@ def generate_answer_and_weight(rng: random.Random, item: dict[str, Any]) -> tupl
     item_type = str(item.get("type") or "text").lower()
     params = item.get("params")
     options = parse_item_options(params)
+    item_id = str(item.get("id") or "")
 
     if item_type in {"select", "radio"} and options:
         answer = rng.choice(options)
@@ -421,7 +348,7 @@ def generate_answer_and_weight(rng: random.Random, item: dict[str, Any]) -> tupl
     elif item_type in {"number", "integer"}:
         answer = str(rng.randint(18, 30))
     elif item_type in {"input", "text", "textarea"}:
-        answer = f"pref-{random_word(rng, 4, 8)}"
+        answer = generate_text_answer(rng, item_id)
     else:
         answer = f"ans-{random_word(rng, 4, 8)}"
 
@@ -431,6 +358,45 @@ def generate_answer_and_weight(rng: random.Random, item: dict[str, Any]) -> tupl
     else:
         weight = float(rng.randint(1, 20))
     return answer, weight
+
+
+def generate_text_answer(rng: random.Random, item_id: str) -> str:
+    profiles = {
+        "q_mvp_self_intro": [
+            "我是比较慢热但好相处的人，平时喜欢按计划完成学习任务，也会给自己留休息时间。",
+            "我性格外向，喜欢和朋友聊天，专业课之外会参加社团和运动。",
+            "我比较独立，喜欢安静稳定的生活节奏，遇到公共事务会主动沟通。",
+            "我平时状态比较松弛，喜欢把宿舍当成恢复精力的地方，也愿意互相照应。",
+        ],
+        "q_mvp_interests": [
+            "喜欢音乐、电影、阅读和散步，偶尔会拍照记录生活。",
+            "喜欢游戏、篮球、健身和看比赛，周末经常运动。",
+            "喜欢编程、科幻、桌游和动漫，空闲时会折腾小项目。",
+            "喜欢旅行、美食、摄影和逛展，也喜欢和朋友一起探索城市。",
+        ],
+        "q_mvp_dorm_atmosphere": [
+            "希望宿舍整体安静温暖，大家互相尊重边界，有事及时沟通。",
+            "希望宿舍像朋友一样相处，可以一起吃饭聊天，但也保留个人空间。",
+            "希望宿舍适合学习和休息，公共区域保持清爽，晚上尽量降低噪声。",
+            "希望氛围轻松一点，大家可以分享日常，也能接受彼此不同节奏。",
+        ],
+        "q_mvp_representative_thing": [
+            "一本随身笔记本，代表我喜欢记录想法和慢慢整理生活。",
+            "一副耳机，代表我需要音乐陪伴，也重视自己的安静空间。",
+            "一双跑鞋，代表我喜欢保持行动感，也愿意尝试新事情。",
+            "一款合作游戏，代表我喜欢团队配合和轻松交流。",
+        ],
+        "q_mvp_roommate_note": [
+            "我睡前比较需要安静，如果要语音或外放，希望能提前说一声。",
+            "我对公共区域卫生比较在意，外卖盒和垃圾希望当天处理。",
+            "我偶尔会晚归或赶作业，但会尽量控制声音和灯光。",
+            "我欢迎直接沟通，不太喜欢把小问题憋很久，大家商量着来最好。",
+        ],
+    }
+    choices = profiles.get(item_id)
+    if not choices:
+        return f"我希望宿舍生活稳定、舒服，也愿意和舍友互相配合。{random_word(rng, 4, 8)}"
+    return rng.choice(choices)
 
 
 def png_chunk(chunk_type: bytes, data: bytes) -> bytes:
@@ -456,7 +422,7 @@ def create_color_png(path: Path, r: int, g: int, b: int, width: int = 64, height
     path.write_bytes(data)
 
 
-def seed_data(cur, rng: random.Random, admin_email: str, admin_password: str, student_password: str, api_root: Path):
+def seed_data(cur, rng: random.Random, admin_email: str, admin_password: str, student_password: str, api_root: Path, student_count: int):
     # settings needed by team logic
     upsert_system_setting(cur, "team_max_student_count", "4")
 
@@ -494,10 +460,14 @@ def seed_data(cur, rng: random.Random, admin_email: str, admin_password: str, st
         )
         team_ids[f"{gname}_half"] = int(cur.lastrowid)
 
+    if student_count < 2 or student_count % 2 != 0:
+        raise ValueError("--student-count 必须是大于等于 2 的偶数")
+
     # generate student IDs and profiles
-    candidate_ids = rng.sample(range(20260001, 20269999), 20)
-    male_ids = candidate_ids[:10]
-    female_ids = candidate_ids[10:]
+    candidate_ids = rng.sample(range(20260001, 20269999), student_count)
+    per_gender_count = student_count // 2
+    male_ids = candidate_ids[:per_gender_count]
+    female_ids = candidate_ids[per_gender_count:]
 
     avatar_dir = api_root / "static" / "uploads" / "student_avatar"
     avatar_dir.mkdir(parents=True, exist_ok=True)
@@ -703,7 +673,7 @@ def main() -> int:
     try:
         with conn.cursor() as cur:
             ensure_schema(cur)
-            ensure_questionnaire(cur, rng)
+            ensure_questionnaire(cur)
             reset_business_data(cur)
             summary = seed_data(
                 cur=cur,
@@ -712,6 +682,7 @@ def main() -> int:
                 admin_password=args.admin_password,
                 student_password=args.student_password,
                 api_root=api_root,
+                student_count=args.student_count,
             )
             conn.commit()
             write_accounts_csv(script_dir / "accounts.csv", summary["accounts"])
